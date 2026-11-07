@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { useLgFocusRegion } from "@/lib/lg-board-link";
+import { findRegion } from "@/lib/lg-regions";
 import { getActiveTutor, setActiveTutor, useLgState } from "@/lib/lg-store";
 import { COLOR_HEX } from "@/lib/lg-types";
 import { LgVoiceProvider, type LgVoiceStatus, useLgVoice } from "@/lib/lg-voice";
@@ -18,13 +20,18 @@ const STATUS_LABEL: Record<LgVoiceStatus, string> = {
   speaking: "Tutor speaking",
 };
 
+// checkWorkTarget turns on the Check my work button. The button follows the region in use on the board.
+type ConversationPanelProps = { checkWorkTarget?: string; footer?: ReactNode };
+
 // One conversation component for Learning Grounds and Chat (vision doc, section 8.2).
-function ConversationDock({ checkWorkTarget, footer }: { checkWorkTarget?: string; footer?: ReactNode }) {
+function ConversationDock({ checkWorkTarget, footer }: ConversationPanelProps) {
   const state = useLgState();
   const tutor = getActiveTutor(state);
   const voice = useLgVoice();
   const [voiceOn, setVoiceOn] = useState(true);
   const [draft, setDraft] = useState("");
+  const focusRegionId = useLgFocusRegion();
+  const focusLabel = findRegion(focusRegionId)?.label;
   const transcript = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -47,11 +54,6 @@ function ConversationDock({ checkWorkTarget, footer }: { checkWorkTarget?: strin
     voice.addLine("student", message);
     voice.sendText(message);
     setDraft("");
-  }
-
-  function checkWork() {
-    // Mocked until /check-work exists (T-801).
-    voice.addLine("system", `Check my work: ${checkWorkTarget} [Mocked: not connected yet.]`);
   }
 
   const tutorOptions = state.tutors.map((item) => ({ value: item.id, label: item.name || "Unnamed tutor" }));
@@ -138,8 +140,8 @@ function ConversationDock({ checkWorkTarget, footer }: { checkWorkTarget?: strin
       </div>
 
       {checkWorkTarget && (
-        <Button type="button" variant="outline" onClick={checkWork}>
-          Check my work: {checkWorkTarget}
+        <Button type="button" variant="outline" disabled={voice.checking} onClick={() => voice.checkWork(focusRegionId)}>
+          {voice.checking ? `Checking ${focusLabel}...` : `Check my work: ${focusLabel}`}
         </Button>
       )}
 
@@ -161,7 +163,7 @@ function ConversationDock({ checkWorkTarget, footer }: { checkWorkTarget?: strin
   );
 }
 
-export function ConversationPanel(props: { checkWorkTarget?: string; footer?: ReactNode }) {
+export function ConversationPanel(props: ConversationPanelProps) {
   return (
     <LgVoiceProvider>
       <ConversationDock {...props} />

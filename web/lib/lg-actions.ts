@@ -7,6 +7,7 @@ import {
   type TLShapePartial,
   toRichText,
 } from "tldraw";
+import { linkLgBoard, noteLgActionTarget } from "./lg-board-link";
 import {
   findRegion,
   LG_PAGES,
@@ -87,6 +88,8 @@ export function applyLgAction(action: LgAction) {
     console.warn("[lg] No board is open, so this action did nothing:", action);
     return;
   }
+
+  noteLgActionTarget(action as { region_id?: string; near_region_id?: string });
 
   switch (action.type) {
     case "focus_region": {
@@ -242,7 +245,9 @@ export function bindLearningGrounds(editor: Editor, filename: string | null) {
   setLgBackground("plain");
   editor.setCurrentTool("draw");
   focusLgPage(1);
+  const unlink = linkLgBoard(editor);
   return () => {
+    unlink();
     if (lgEditor === editor) lgEditor = null;
   };
 }

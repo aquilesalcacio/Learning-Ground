@@ -3,6 +3,7 @@
 import { type ClientTools, ConversationProvider, useConversation } from "@elevenlabs/react";
 import { type ReactNode, useRef, useState } from "react";
 import { applyLgAction, type LgAction } from "./lg-actions";
+import { checkStudentWork, type WorkCheck, workReport } from "./lg-check-work";
 import { findVoice } from "./lg-voices";
 import type { Tutor } from "./lg-types";
 
@@ -12,6 +13,14 @@ const AGENT_ID = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID ?? "";
 export type LgVoiceStatus = "idle" | "connecting" | "listening" | "speaking";
 export type LgVoiceLine = { id: number; who: "student" | "tutor" | "system"; text: string };
 type SessionRequest = { tutor: Tutor; textOnly: boolean };
+
+const CHECK_STATUS_LABEL: Record<WorkCheck["status"], string> = {
+  correct: "looks right",
+  incomplete: "right so far, not finished",
+  error: "there's something to fix",
+  blank: "no math found",
+  unreadable: "couldn't read it",
+};
 
 function act(name: string, parameters: Record<string, unknown>, action: LgAction) {
   // Timestamps feed the latency targets Q-01 and Q-02 in the technical scope.
@@ -35,6 +44,13 @@ const clientTools: ClientTools = {
   write_text: (p) => act("write_text", p, { type: "write_text", near_region_id: text(p.near_region_id), text: text(p.text) }),
   write_math: (p) => act("write_math", p, { type: "write_math", near_region_id: text(p.near_region_id), latex: text(p.latex) }),
   clear: (p) => act("clear", p, { type: "clear" }),
+  // The only blocking tool: the tutor waits for this answer before it replies.
+  read_student_work: async (p) => {
+    console.log(`[lg-voice] ${new Date().toISOString()} tool read_student_work`, p);
+    const outcome = await checkStudentWork(text(p.region_id));
+    console.log(`[lg-voice] ${new Date().toISOString()} read_student_work done`, outcome.ok);
+    return outcome.ok ? workReport(outcome) : outcome.message;
+  },
 };
 
 function sessionOptions({ tutor, textOnly }: SessionRequest) {
@@ -58,6 +74,7 @@ export function LgVoiceProvider({ children }: { children: ReactNode }) {
 export function useLgVoice() {
   const [lines, setLines] = useState<LgVoiceLine[]>([]);
   const [error, setError] = useState("");
+  const [checking, setChecking] = useState(false);
   const nextLineId = useRef(0);
   const restart = useRef<SessionRequest | null>(null);
 
@@ -102,6 +119,25 @@ export function useLgVoice() {
     conversation.startSession(sessionOptions({ tutor, textOnly }));
   }
 
+  // The Check my work button. With a session, the tutor responds; without one, the hint goes on the board.
+  async function checkWork(region_id: string) {
+    if (checking) return;
+    setChecking(true);
+    const outcome = await checkStudentWork(region_id);
+    setChecking(false);
+    if (!outcome.ok) {
+      addLine("system", outcome.message);
+      return;
+    }
+    addLine("system", `Checked ${outcome.label}: ${CHECK_STATUS_LABEL[outcome.check.status]}.`);
+    if (connected) {
+      conversation.sendUserMessage(`[Check my work]\n${workReport(outcome)}`);
+    } else if (outcome.check.hint) {
+      addLine("system", outcome.check.hint);
+      applyLgAction({ type: "write_text", near_region_id: region_id, text: outcome.check.hint });
+    }
+  }
+
   function switchTutor(tutor: Tutor, textOnly: boolean) {
     const name = tutor.name || "Unnamed tutor";
     setLines([{ id: nextLineId.current++, who: "system", text: `Switched to ${name}. New session.` }]);
@@ -116,6 +152,8 @@ export function useLgVoice() {
     lines,
     error,
     addLine,
+    checking,
+    checkWork,
     start,
     switchTutor,
     end: conversation.endSession,

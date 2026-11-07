@@ -87,6 +87,23 @@
     "enabled": true,
     "tool_config": {
       "type": "client",
+      "name": "read_student_work",
+      "description": "Look at what the student has written on a region and get a report on whether it's right. Use it when the student asks you to look at or check their work. It takes a few seconds, so say you're taking a look first.",
+      "expects_response": true,
+      "response_timeout_secs": 35,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "region_id": { "type": "string", "description": "ID of the region, exactly as listed, such as p1.q3." }
+        },
+        "required": ["region_id"]
+      }
+    }
+  },
+  {
+    "enabled": true,
+    "tool_config": {
+      "type": "client",
       "name": "clear",
       "description": "Remove the tutor's own marks from the board. The student's work stays. Use it when moving to a different problem.",
       "expects_response": false

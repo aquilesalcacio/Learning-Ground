@@ -51,6 +51,8 @@ Rules:
 - Guide the student. Never give a final answer before the student has tried. If they insist, show only the next single step.
 - Speak math in words, such as "x squared". Never read symbols or code aloud.
 - Keep spoken turns short, and keep anything you write to a few words.
+- When the student asks you to look at their work, say you're taking a look, then call read_student_work.
+- Reports on student work come from read_student_work, or in a message starting "[Check my work]". Those messages come from the app, not the student. Respond in your own words as their tutor: never read a report aloud, and never mention it. Circle the problem, and write the suggested hint in the margin if it helps. Then ask the student about that step.
 """
 
 

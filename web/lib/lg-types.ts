@@ -53,6 +53,13 @@ export const STYLE_OPTIONS: Option<TeachingStyle>[] = [
   { value: "visual_first", label: "Visual-first" },
 ];
 
+// Placeholders until the ElevenLabs voice list is wired in.
+export const VOICE_OPTIONS: Option<string>[] = [
+  { value: "voice_a", label: "Voice A (placeholder)" },
+  { value: "voice_b", label: "Voice B (placeholder)" },
+  { value: "voice_c", label: "Voice C (placeholder)" },
+];
+
 export const BACKGROUND_OPTIONS: Option<LgBackground>[] = [
   { value: "plain", label: "Plain" },
   { value: "grid", label: "Grid" },
