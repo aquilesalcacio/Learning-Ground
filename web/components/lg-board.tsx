@@ -3,7 +3,10 @@
 import { type TLComponents, Tldraw } from "tldraw";
 import "tldraw/tldraw.css";
 import { bindLearningGrounds } from "@/lib/lg-actions";
+import { boardPersistenceKey } from "@/lib/lg-store";
 
+// Every piece of tldraw's own chrome is off. The chat dock's pencil menu is the
+// only toolbar, which is what leaves the page itself uncluttered.
 const components: TLComponents = {
   MainMenu: null,
   PageMenu: null,
@@ -11,15 +14,28 @@ const components: TLComponents = {
   DebugMenu: null,
   DebugPanel: null,
   SharePanel: null,
-  // The MVP customizes background and pen color only, from the side panel (vision doc, section 4.1).
   StylePanel: null,
+  Toolbar: null,
+  NavigationPanel: null,
+  ActionsMenu: null,
+  QuickActions: null,
+  ZoomMenu: null,
+  MenuPanel: null,
+  TopPanel: null,
+  HelperButtons: null,
+  Minimap: null,
 };
 
 // tldraw only appears here and in lib/lg-actions.ts, which keeps a library switch contained.
-export default function LgBoard({ filename }: { filename: string | null }) {
+// Each chat saves its own board in the browser, under its own key.
+export default function LgBoard({ boardId }: { boardId: string }) {
   return (
     <div className="absolute inset-0">
-      <Tldraw components={components} onMount={(editor) => bindLearningGrounds(editor, filename)} />
+      <Tldraw
+        components={components}
+        persistenceKey={boardPersistenceKey(boardId)}
+        onMount={(editor) => bindLearningGrounds(editor)}
+      />
     </div>
   );
 }
