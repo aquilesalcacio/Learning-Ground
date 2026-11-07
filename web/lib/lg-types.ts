@@ -27,10 +27,34 @@ export type StudentProfile = {
   struggles: string;
 };
 
+// One page of the homework, in board units. Its image lives in the board's IndexedDB, not here.
+// read: whether Gemini has read it. A pending or failed page has one whole-page region, p{n}.page.
+export type LgDocumentPage = {
+  number: number;
+  w: number;
+  h: number;
+  read: "pending" | "done" | "failed";
+};
+
+// A problem on a page. The app builds region_id (p1.q3, or p1.page for a whole page), never Gemini.
+export type LgRegion = {
+  region_id: string;
+  label: string;
+  page: number;
+  // [ymin, xmin, ymax, xmax] on a 0-1000 scale of the page as displayed. Only lg-regions.ts converts it.
+  box_2d: [number, number, number, number];
+  text: string;
+};
+
 export type LgDocument = {
   filename: string;
   page_count: number;
-  status: "ready";
+  // "reading" while Gemini works through the pages; the pages are usable throughout.
+  status: "reading" | "ready";
+  // SHA-256 of the file's bytes, which keys the page-reading cache.
+  hash: string;
+  pages: LgDocumentPage[];
+  regions: LgRegion[];
 };
 
 export type ChatSpeaker = "student" | "tutor" | "system";

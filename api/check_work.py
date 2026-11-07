@@ -3,27 +3,21 @@
 The result goes to the tutor, who answers in its own voice (vision doc, section 8.4).
 """
 import logging
-import os
-import time
-from pathlib import Path
 from typing import Literal
 
-from dotenv import load_dotenv
 from google import genai
-from google.genai import errors, types
+from google.genai import types
 from pydantic import BaseModel
+
+from gemini import MODELS, RETRYABLE_CODES, GeminiError, generate_json, make_client, with_fallback
 
 log = logging.getLogger("learning_grounds.check_work")
 
-API_DIR = Path(__file__).resolve().parent
-load_dotenv(API_DIR / ".env")
-# Each model has its own daily free-tier quota, so a later one covers a limit on an earlier one.
-# Lite goes first because it answered in 1-2 s, against 5-8 s for gemini-3.6-flash, with the same
-# results on scripts/eval_check_work.py. gemini-3.8-flash is out: its free tier allows 20 requests a day.
-MODELS = tuple(os.environ.get("GEMINI_MODELS", "gemini-3.5-flash-lite,gemini-3.6-flash,gemini-3.5-flash").split(","))
+__all__ = ["MODELS", "RETRYABLE_CODES", "CheckWorkError", "Language", "WorkCheck", "check_work"]
+
 # About 2 s is normal, so a slow model is skipped: a tutor is on hold. Google rejects anything under 10 s.
 TIMEOUT_MS = 10_000
-RETRYABLE_CODES = {429, 500, 503, 504}
+# No backoff rounds: a tutor is on hold, so a busy Gemini fails fast and the tutor says so.
 
 Language = Literal["pt", "es", "en"]
 LANGUAGE_NAMES: dict[Language, str] = {"pt": "Brazilian Portuguese", "es": "Spanish", "en": "English"}
@@ -36,7 +30,7 @@ class WorkCheck(BaseModel):
     hint: str
 
 
-class CheckWorkError(Exception):
+class CheckWorkError(GeminiError):
     """Gemini couldn't produce a check. The message is safe to show the student."""
 
 
@@ -61,48 +55,25 @@ Write analysis and hint in plain words with no LaTeX, because the tutor may say 
 
 
 def _client() -> genai.Client:
-    key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if not key:
-        raise CheckWorkError("Check my work isn't set up: GEMINI_API_KEY is missing on the server.")
-    return genai.Client(api_key=key, http_options=types.HttpOptions(timeout=TIMEOUT_MS))
+    return make_client("Check my work", TIMEOUT_MS, CheckWorkError)
 
 
 async def _generate(client: genai.Client, model: str, image: bytes, mime_type: str, prompt: str) -> WorkCheck | None:
-    response = await client.aio.models.generate_content(
-        model=model,
-        contents=[types.Part.from_bytes(data=image, mime_type=mime_type), prompt],
-        config=types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
-            response_mime_type="application/json",
-            response_schema=WorkCheck,
-        ),
-    )
-    return response.parsed if isinstance(response.parsed, WorkCheck) else None
+    parts = [types.Part.from_bytes(data=image, mime_type=mime_type), prompt]
+    return await generate_json(client, model, parts, SYSTEM_PROMPT, WorkCheck)
 
 
 async def check_work(image: bytes, mime_type: str, language: Language, label: str) -> WorkCheck:
     client = _client()
     target = f' The student asked about "{label}".' if label else ""
     prompt = f"Check this work.{target} Write analysis and hint in {LANGUAGE_NAMES[language]}, with all of its accents."
-
-    for model in MODELS:
-        started = time.perf_counter()
-        try:
-            result = await _generate(client, model, image, mime_type, prompt)
-        except errors.APIError as error:
-            # Only the code is logged: the response text could echo request details.
-            log.warning("%s failed with code %s", model, error.code)
-            if error.code in RETRYABLE_CODES:
-                continue
-            raise CheckWorkError("Gemini couldn't check this work. Please try again.") from error
-        except Exception as error:
-            # Timeouts and network failures arrive as the SDK's own HTTP library types, which can
-            # change between versions. A failure here should never crash a tutor's turn.
-            log.warning("%s couldn't be reached: %s", model, type(error).__name__)
-            continue
-        if result is None:
-            log.warning("%s returned a result that didn't match the schema", model)
-            continue
-        log.info("%s checked work in %.1f s: %s", model, time.perf_counter() - started, result.status)
-        return result
-    raise CheckWorkError("Gemini is busy right now. Please try again in a minute.")
+    result = await with_fallback(
+        # Looked up at call time, so tests can replace _generate.
+        lambda model: _generate(client, model, image, mime_type, prompt),
+        what="check work",
+        error=CheckWorkError,
+        failed_message="Gemini couldn't check this work. Please try again.",
+        busy_message="Gemini is busy right now. Please try again in a minute.",
+    )
+    log.info("checked work: %s", result.status)
+    return result

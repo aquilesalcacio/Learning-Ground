@@ -34,7 +34,7 @@ export default function LgBoard({ boardId }: { boardId: string }) {
       <Tldraw
         components={components}
         persistenceKey={boardPersistenceKey(boardId)}
-        onMount={(editor) => bindLearningGrounds(editor)}
+        onMount={(editor) => bindLearningGrounds(editor, boardId)}
       />
     </div>
   );

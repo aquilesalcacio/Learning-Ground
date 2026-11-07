@@ -4,11 +4,15 @@ import { type ClientTools, ConversationProvider, useConversation } from "@eleven
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import { applyLgAction, type LgAction } from "./lg-actions";
 import { checkStudentWork, type WorkCheck, workReport } from "./lg-check-work";
+import { getActiveDocument, readLgState } from "./lg-store";
+import { buildTutorPrompt, type LgHomeworkContext, resolveLanguage, toneVoiceSettings } from "./lg-tutor-prompt";
 import { findVoice } from "./lg-voices";
-import type { ChatSpeaker, Tutor } from "./lg-types";
+import type { ChatSpeaker, LgDocument, Tutor } from "./lg-types";
 
 // Temporary for the G1 test: a public agent needs only its ID. T-203 replaces this with a server token.
 const AGENT_ID = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID ?? "";
+
+const SILENT_TURN = /^[\s.…]*$/;
 
 export type LgVoiceStatus = "idle" | "connecting" | "listening" | "speaking";
 type SessionRequest = { tutor: Tutor; textOnly: boolean };
@@ -52,15 +56,31 @@ const clientTools: ClientTools = {
   },
 };
 
+// A chat's homework, as the tutor prompt sees it: the regions read from its pages, with the
+// text Gemini read. A page with no problems found is one p{n}.page region holding the page's text.
+// Null when no homework is open, so the prompt tells the tutor not to claim any marks.
+export function homeworkContext(document: LgDocument | null): LgHomeworkContext | null {
+  if (!document) return null;
+  const regions = document.regions.map(({ region_id, label, text }) => ({ region_id, label, text }));
+  return { filename: document.filename, regions };
+}
+
+// Read when each session starts, so tutor edits, the profile and homework apply to the next one.
 function sessionOptions({ tutor, textOnly }: SessionRequest) {
-  const voice = tutor.language ? findVoice(tutor.language, tutor.voice_id) : undefined;
+  const state = readLgState();
+  const language = resolveLanguage(tutor, state.profile);
+  const voice = findVoice(language, tutor.voice_id);
+  const prompt = buildTutorPrompt(tutor, state.profile, homeworkContext(getActiveDocument(state)));
   return {
     agentId: AGENT_ID,
     textOnly,
-    // Unset fields are left out: a blank voice uses that language's default on the agent.
+    // Tags such as [laughs] are spoken as expression and never shown in the transcript.
+    stripAudioTags: true,
+    // Every field sent here must be allowed in the agent's overrides (elevenlabs_setup.py),
+    // or the session fails. A blank voice uses that language's default on the agent.
     overrides: {
-      ...(tutor.language ? { agent: { language: tutor.language } } : {}),
-      ...(voice ? { tts: { voiceId: voice.voice_id } } : {}),
+      agent: { language, prompt: { prompt } },
+      tts: { ...(voice ? { voiceId: voice.voice_id } : {}), ...toneVoiceSettings(tutor) },
     },
   };
 }
@@ -78,16 +98,25 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
   const [restarting, setRestarting] = useState(false);
   const restart = useRef<SessionRequest | null>(null);
   const pendingText = useRef<string[]>([]);
+  // Contextual updates that arrived while a session was connecting. Its prompt was already built.
+  const pendingContext = useRef<string[]>([]);
 
   const conversation = useConversation({
-    onMessage: ({ message, role }) => onLine(role === "user" ? "student" : "tutor", message),
+    onMessage: ({ message, role }) => {
+      // After each turn timeout of silence, ElevenLabs logs a student turn of "...". It isn't speech.
+      if (!message.trim() || (role === "user" && SILENT_TURN.test(message))) return;
+      onLine(role === "user" ? "student" : "tutor", message);
+    },
     onConnect: () => {
+      for (const message of pendingContext.current) conversation.sendContextualUpdate(message);
+      pendingContext.current = [];
       for (const message of pendingText.current) conversation.sendUserMessage(message);
       pendingText.current = [];
     },
     onError: (message) => {
       console.error("[lg-voice]", message);
       pendingText.current = [];
+      pendingContext.current = [];
       setError(message);
     },
     onModeChange: ({ mode }) => console.log(`[lg-voice] ${new Date().toISOString()} mode ${mode}`),
@@ -100,6 +129,7 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
         conversation.startSession(sessionOptions(next));
       } else {
         pendingText.current = [];
+        pendingContext.current = [];
         onLine("system", "Session ended.");
       }
     },
@@ -169,9 +199,21 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
     else pendingText.current.push(message);
   }
 
+  // Background information for the live session, such as homework opened mid-session
+  // (build it with homeworkContextualUpdate). The tutor doesn't reply to it. Without a
+  // session it's dropped: the next session's prompt reads the homework anyway. A session
+  // still connecting gets it once it opens, because its prompt was built before this arrived.
+  function sendContextualUpdate(message: string) {
+    if (connected) conversation.sendContextualUpdate(message);
+    else if (status === "connecting") pendingContext.current.push(message);
+    else return false;
+    return true;
+  }
+
   const end = useCallback(() => {
     restart.current = null;
     pendingText.current = [];
+    pendingContext.current = [];
     setRestarting(false);
     endSession();
   }, [endSession]);
@@ -188,6 +230,7 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
     switchTutor,
     end,
     sendWhenReady,
+    sendContextualUpdate,
     muted: conversation.isMuted,
     setMuted: conversation.setMuted,
   };

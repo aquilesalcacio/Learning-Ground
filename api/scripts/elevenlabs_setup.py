@@ -1,6 +1,6 @@
 """Set up the ElevenLabs agent and the voice catalog for Learning Grounds tutors.
 
-One agent becomes any tutor: each session overrides its prompt, language and voice.
+One agent becomes any tutor: each session overrides its prompt, language, voice, stability and speed.
 
     uv run scripts/elevenlabs_setup.py voices pt       # list voices and write a page to listen to them
     uv run scripts/elevenlabs_setup.py add pt 2 5 7    # add those numbered voices to the catalog
@@ -29,30 +29,29 @@ BASE_URL = "https://api.elevenlabs.io"
 AGENT_NAME = "Learning Grounds Tutor"
 LLM = "gemini-3.8-flash"
 REASONING_EFFORT = "low"
-# English uses Flash v2. ElevenLabs moves the additional languages to its v2.5 Multilingual model.
-TTS_MODEL = "eleven_flash_v2"
+# Expressive real-time model for all three languages. It reads audio tags such as [laughs]
+# and turns expressive mode on. To roll back, set eleven_flash_v2 and run `agent` again.
+TTS_MODEL = "eleven_v4_turbo"
 LANGUAGES = ("pt", "es", "en")
 PRIMARY_LANGUAGE = "en"
 
-FIRST_MESSAGES = {
-    "en": "Hi! Which problem do you want to work on?",
-    "pt": "Oi! Em qual questão você quer trabalhar?",
-    "es": "¡Hola! ¿En qué problema quieres trabajar?",
-}
+# The student speaks first. An empty first message makes the agent wait (plan step A).
+FIRST_MESSAGE = ""
+# Seconds of silence before the agent takes a turn. 30 is the documented maximum, and the
+# prompt then tells it to call skip_turn and stay quiet.
+TURN_TIMEOUT = 30
+# A whole tutoring session. The ElevenLabs default of 600 would cut one off.
+MAX_DURATION_SECONDS = 1800
 
-# Stand-in for the G1 test. Sessions replace it with the locked core, persona and context (T-501, T-503).
-BASE_PROMPT = """You are a math tutor working through a student's homework with them, out loud, on a shared board.
+# Fallback only. Every web session replaces it with web/lib/lg-tutor-prompt.ts, which holds the
+# persona, profile, homework regions and the locked core with the tool rules.
+BASE_PROMPT = """You are a patient math tutor helping a student with their homework, out loud, on a shared board.
 
-Regions on the board: p1.q1, p1.q2, p1.q3, p1.q4, p2.q5, p2.q6. For example, p1.q3 is Problem 3 on page 1.
-
-Rules:
-- Use only the region IDs listed above. Never mention the IDs aloud; say "problem 3".
-- Mark first, then explain: call the tool as you begin the sentence about that problem.
+- The student speaks first. If they're quiet or thinking, stay silent and call skip_turn. Never prompt them.
 - Guide the student. Never give a final answer before the student has tried. If they insist, show only the next single step.
 - Speak math in words, such as "x squared". Never read symbols or code aloud.
-- Keep spoken turns short, and keep anything you write to a few words.
-- When the student asks you to look at their work, say you're taking a look, then call read_student_work.
-- Reports on student work come from read_student_work, or in a message starting "[Check my work]". Those messages come from the app, not the student. Respond in your own words as their tutor: never read a report aloud, and never mention it. Circle the problem, and write the suggested hint in the margin if it helps. Then ask the student about that step.
+- Keep spoken turns short.
+- No homework regions have been shared with you, so don't use the board tools, and never say you've marked anything.
 """
 
 
@@ -171,17 +170,32 @@ def sync_tools(http: httpx.Client) -> list[str]:
     return ids
 
 
+# A built-in system tool: the agent ends its turn without speaking.
+SKIP_TURN = {
+    "type": "system",
+    "name": "skip_turn",
+    "description": "Stay silent and let the student keep thinking. Use it whenever the student is quiet, thinking or working, or hasn't spoken yet.",
+    # The default, auto, can add a spoken line before the tool runs, which would defeat it.
+    "pre_tool_speech": "off",
+    # -1: after skipping, wait silently until the student speaks, with no check-in.
+    "params": {"system_tool_type": "skip_turn", "wait_timeout_secs": -1},
+}
+
+
 def agent_body(tool_ids: list[str], catalog: dict, require_auth: bool) -> dict:
     presets = {}
     for language in LANGUAGES:
         if language == PRIMARY_LANGUAGE:
             continue
-        overrides = {"agent": {"first_message": FIRST_MESSAGES[language]}}
+        # A preset only picks that language's default voice. Its first message is cleared
+        # explicitly, because an update keeps fields it isn't sent. No model here, so the
+        # agent's model and each session's voice settings apply in every language.
+        overrides = {"agent": {"first_message": None}}
         if catalog[language]:
             overrides["tts"] = {"voice_id": catalog[language][0]["voice_id"]}
         presets[language] = {"overrides": overrides}
 
-    tts = {"model_id": TTS_MODEL}
+    tts = {"model_id": TTS_MODEL, "expressive_mode": True}
     if catalog[PRIMARY_LANGUAGE]:
         tts["voice_id"] = catalog[PRIMARY_LANGUAGE][0]["voice_id"]
 
@@ -190,24 +204,30 @@ def agent_body(tool_ids: list[str], catalog: dict, require_auth: bool) -> dict:
         "conversation_config": {
             "agent": {
                 "language": PRIMARY_LANGUAGE,
-                "first_message": FIRST_MESSAGES[PRIMARY_LANGUAGE],
+                "first_message": FIRST_MESSAGE,
                 "prompt": {
                     "prompt": BASE_PROMPT,
                     "llm": LLM,
                     "reasoning_effort": REASONING_EFFORT,
                     "tool_ids": tool_ids,
+                    "built_in_tools": {"skip_turn": SKIP_TURN},
                 },
             },
             "tts": tts,
+            # Students pause while they work, so the agent waits longer before it answers.
+            "turn": {"turn_timeout": TURN_TIMEOUT, "turn_eagerness": "patient"},
+            "conversation": {"max_duration_seconds": MAX_DURATION_SECONDS},
             "language_presets": presets,
         },
         "platform_settings": {
             "auth": {"enable_auth": require_auth},
-            # Off by default. Without these, sending a per-tutor override makes the session fail.
+            # Off by default. Without these, sending a per-tutor override makes the session fail,
+            # so run `agent` before shipping web code that sends a new one.
             "overrides": {
                 "conversation_config_override": {
                     "agent": {"first_message": True, "language": True, "prompt": {"prompt": True}},
-                    "tts": {"voice_id": True},
+                    # Each tutor's tone sets stability and speed (lg-tutor-prompt.ts).
+                    "tts": {"voice_id": True, "stability": True, "speed": True},
                     "conversation": {"text_only": True},
                 }
             },

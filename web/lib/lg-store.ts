@@ -45,7 +45,9 @@ export function readLgState(): LgState {
   if (cached) return cached;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    cached = raw ? { ...DEFAULT_STATE, ...JSON.parse(raw) } : DEFAULT_STATE;
+    const saved = raw ? JSON.parse(raw) : null;
+    // Profiles saved before a field existed get its default instead of undefined.
+    cached = saved ? { ...DEFAULT_STATE, ...saved, profile: { ...DEFAULT_STATE.profile, ...saved.profile } } : DEFAULT_STATE;
   } catch {
     cached = DEFAULT_STATE;
   }
@@ -71,13 +73,13 @@ function writeLgState(next: LgState) {
   listeners.forEach((listener) => listener());
 }
 
-function subscribe(listener: () => void) {
+export function subscribeLgState(listener: () => void) {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
 export function useLgState(): LgState {
-  return useSyncExternalStore(subscribe, readLgState, () => DEFAULT_STATE);
+  return useSyncExternalStore(subscribeLgState, readLgState, () => DEFAULT_STATE);
 }
 
 const noSubscribe = () => () => {};
@@ -135,18 +137,38 @@ export function updateProfile(patch: Partial<StudentProfile>) {
 }
 
 export function getActiveDocument(state: LgState): LgDocument | null {
-  return getActiveConversation(state)?.document ?? null;
+  const document = getActiveConversation(state)?.document;
+  return isCurrentDocument(document) ? document : null;
 }
 
-// Adding homework begins a chat, if one hasn't begun already.
-export function setLgDocument(document: LgDocument | null) {
+// A document saved before real page reading has no pages, and can't be shown.
+function isCurrentDocument(document: LgDocument | null | undefined): document is LgDocument {
+  return !!document && Array.isArray(document.pages) && Array.isArray(document.regions);
+}
+
+export function getConversationDocument(state: LgState, conversation_id: string): LgDocument | null {
+  const document = state.conversations.find((item) => item.id === conversation_id)?.document;
+  return isCurrentDocument(document) ? document : null;
+}
+
+// Adding homework begins a chat, if one hasn't begun already. Returns the chat's ID.
+export function setLgDocument(document: LgDocument | null): string | null {
   const active = readLgState().active_conversation_id;
-  if (!active && !document) return;
+  if (!active && !document) return null;
   const id = active ?? startConversation();
+  setConversationDocument(id, () => document);
+  return id;
+}
+
+// Updates one chat's homework, whichever chat is on screen. Pages are read in the background,
+// so a reading can land after the student has moved to another chat.
+export function setConversationDocument(id: string, update: (current: LgDocument | null) => LgDocument | null) {
   const state = readLgState();
   writeLgState({
     ...state,
-    conversations: state.conversations.map((item) => (item.id === id ? { ...item, document } : item)),
+    conversations: state.conversations.map((item) =>
+      item.id === id ? { ...item, document: update(isCurrentDocument(item.document) ? item.document : null) } : item,
+    ),
   });
 }
 

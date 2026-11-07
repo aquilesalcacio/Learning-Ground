@@ -1,15 +1,17 @@
 "use client";
 
 import { ChevronDown, Mic, MicOff, Send, Square } from "lucide-react";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useEffectEvent, useRef, useState } from "react";
 import { BoardTools } from "@/components/board-tools";
 import { TutorSwitcher } from "@/components/tutor-switcher";
 import { UploadDialog } from "@/components/upload-dialog";
 import { Button } from "@/components/ui/button";
+import { onLgHomeworkRead } from "@/lib/lg-actions";
 import {
   appendMessage,
   getActiveConversation,
   getActiveTutor,
+  getConversationDocument,
   type LgState,
   readLgState,
   setActiveTutor,
@@ -17,7 +19,8 @@ import {
   startConversation,
 } from "@/lib/lg-store";
 import { COLOR_HEX } from "@/lib/lg-types";
-import { LgVoiceProvider, useLgVoice } from "@/lib/lg-voice";
+import { homeworkContextualUpdate } from "@/lib/lg-tutor-prompt";
+import { homeworkContext, LgVoiceProvider, useLgVoice } from "@/lib/lg-voice";
 
 // The only chrome over the board: a tutor pill, the recent transcript, and one bar.
 function Dock({ state, boardId }: { state: LgState; boardId: string }) {
@@ -37,6 +40,15 @@ function Dock({ state, boardId }: { state: LgState; boardId: string }) {
     },
   });
   const { status, end } = voice;
+
+  // Homework read during a live session reaches the tutor as background context. A session
+  // started later reads it from its prompt instead.
+  const tellTutorAboutHomework = useEffectEvent((conversation_id: string) => {
+    if (conversation_id !== sessionConversation.current) return;
+    const homework = homeworkContext(getConversationDocument(readLgState(), conversation_id));
+    if (homework) voice.sendContextualUpdate(homeworkContextualUpdate(homework));
+  });
+  useEffect(() => onLgHomeworkRead((conversation_id) => tellTutorAboutHomework(conversation_id)), []);
 
   const messages = conversation?.messages ?? [];
   const active = status !== "idle";
