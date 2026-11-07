@@ -3,14 +3,15 @@
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ColorSwatches, FieldSelect, MockBadge } from "@/components/lg-fields";
+import { ColorSwatches, FieldSelect } from "@/components/lg-fields";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { deleteTutor, updateTutor, useHydrated, useLgState } from "@/lib/lg-store";
-import { LANGUAGE_OPTIONS, STYLE_OPTIONS, TONE_OPTIONS, TUTOR_COLORS, VOICE_OPTIONS } from "@/lib/lg-types";
+import { LANGUAGE_OPTIONS, STYLE_OPTIONS, TONE_OPTIONS, TUTOR_COLORS } from "@/lib/lg-types";
+import { defaultVoice, findVoice, voiceOptions } from "@/lib/lg-voices";
 
 // The locked core from the vision doc, section 5. Students can read it but not edit it.
 const LOCKED_CORE = [
@@ -41,6 +42,8 @@ export function TutorEditor() {
       </div>
     );
   }
+
+  const previewUrl = (findVoice(tutor.language, tutor.voice_id) ?? defaultVoice(tutor.language))?.preview_url;
 
   return (
     <div className="mx-auto grid w-full max-w-2xl gap-6 p-4 sm:p-8">
@@ -81,30 +84,30 @@ export function TutorEditor() {
           <CardTitle>Voice and language</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4">
-          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto]">
-            <FieldSelect
-              id="tutor-voice"
-              label="Voice"
-              value={tutor.voice_id}
-              options={VOICE_OPTIONS}
-              placeholder="Choose a voice"
-              onChange={(voice_id) => updateTutor(tutor.id, { voice_id })}
-            />
-            <Button type="button" variant="outline" disabled>
-              Preview voice
-            </Button>
-          </div>
-          <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            <MockBadge /> ElevenLabs voices and previews aren&apos;t connected yet.
-          </p>
           <FieldSelect
             id="tutor-language"
             label="Language"
             value={tutor.language}
             options={LANGUAGE_OPTIONS}
             placeholder="Choose a language"
-            onChange={(language) => updateTutor(tutor.id, { language })}
+            onChange={(language) => {
+              // Voices belong to a language, so changing it clears the choice.
+              if (language !== tutor.language) updateTutor(tutor.id, { language, voice_id: "" });
+            }}
           />
+          <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto]">
+            <FieldSelect
+              id="tutor-voice"
+              label="Voice"
+              value={findVoice(tutor.language, tutor.voice_id)?.voice_id ?? ""}
+              options={voiceOptions(tutor.language)}
+              placeholder={tutor.language ? "Language default" : "Choose a language first"}
+              onChange={(voice_id) => updateTutor(tutor.id, { voice_id })}
+            />
+            <Button type="button" variant="outline" disabled={!previewUrl} onClick={() => previewUrl && new Audio(previewUrl).play()}>
+              Preview voice
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

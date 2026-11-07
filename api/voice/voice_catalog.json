@@ -1,0 +1,136 @@
+{
+  "pt": [
+    {
+      "voice_id": "u4sbCzXyUVxIAihOtCss",
+      "name": "Pai Wesley - Calm",
+      "gender": "male",
+      "accent": "brazilian",
+      "locale": "pt-BR",
+      "preview_url": "https://storage.googleapis.com/eleven-public-prod/database/workspace/f5608b5374244d43865440ca8bbf6017/voices/u4sbCzXyUVxIAihOtCss/ee65d10c-6e78-4ef8-adfa-b76993453d38.mp3"
+    },
+    {
+      "voice_id": "fjYrCoyeYNBCYTQF6ax2",
+      "name": "Isaias - Natural Podcast",
+      "gender": "male",
+      "accent": "brazilian",
+      "locale": "pt-BR",
+      "preview_url": "https://api.us.elevenlabs.io/v1/voices/fjYrCoyeYNBCYTQF6ax2/previews/audio?payload=eyJ2b2ljZV9zb3VyY2UiOiJjdXN0b20iLCJ3b3Jrc3BhY2VfaWQiOiI0MWE2ZjcyZTY0ZDg0ZTEwOTgxM2EzODIyNjc4YzdiOCIsImZpbGVuYW1lIjoieURna1I4WWc2UEoza0xzRGVpbHIubXAzIiwidGltZXN0YW1wIjoxNzk0MDcwODAwMDAwMDAwfQ%3D%3D"
+    },
+    {
+      "voice_id": "6PhbMr9YjdeOaTNz9y24",
+      "name": "Davi Leão - Natural & Conversational",
+      "gender": "male",
+      "accent": "brazilian",
+      "locale": "pt-BR",
+      "preview_url": "https://api.us.elevenlabs.io/v1/voices/6PhbMr9YjdeOaTNz9y24/previews/audio?payload=eyJ2b2ljZV9zb3VyY2UiOiJjdXN0b20iLCJ3b3Jrc3BhY2VfaWQiOiJhMmZkZGU0NDdhNGI0NDhiYjYyMzAwN2FjZGJhMTY1ZiIsImZpbGVuYW1lIjoiM2YxZGYwMzItN2Q4ZC00MGQ0LThjNzMtZTVjNWE4YTE5ODgxLm1wMyIsInRpbWVzdGFtcCI6MTc5NDA3MDgwMDAwMDAwMH0%3D"
+    },
+    {
+      "voice_id": "tgdUjOYNdMYKFLKpkiG6",
+      "name": "Victor - Calm & Natural",
+      "gender": "male",
+      "accent": "brazilian",
+      "locale": "pt-BR",
+      "preview_url": "https://storage.googleapis.com/eleven-public-prod/database/workspace/1989c430ab764bcea50e2082525622d0/voices/tgdUjOYNdMYKFLKpkiG6/77b442ba-adad-4a75-ba4d-5a7fc1b8f33f.mp3"
+    },
+    {
+      "voice_id": "n2a9VtkZLl8j1FSXHsL7",
+      "name": "Sofia - Natural & Expressive",
+      "gender": "female",
+      "accent": "brazilian",
+      "locale": "pt-BR",
+      "preview_url": "https://storage.googleapis.com/eleven-public-prod/database/workspace/12fefc5ea64746eda2fe686bed7a759e/voices/n2a9VtkZLl8j1FSXHsL7/8e1183ee-cf39-4b2c-b2b0-0f0d56d608a1.mp3"
+    },
+    {
+      "voice_id": "u7N1p4OIOc6Fl7y72WE7",
+      "name": "Yuri - Natural Brazilian Narrator",
+      "gender": "male",
+      "accent": "brazilian",
+      "locale": "pt-BR",
+      "preview_url": "https://storage.googleapis.com/eleven-public-prod/database/workspace/7469ca8916c44ad593db8376fd6bbeb4/voices/u7N1p4OIOc6Fl7y72WE7/3cgFY6NYeooiDwazQ48r.mp3"
+    }
+  ],
+  "es": [
+    {
+      "voice_id": "IhY4M972n9BRInNffBsN",
+      "name": "Cristóbal",
+      "gender": "male",
+      "accent": "chilean",
+      "locale": "es-CL",
+      "preview_url": "https://api.us.elevenlabs.io/v1/voices/IhY4M972n9BRInNffBsN/previews/audio?payload=eyJ2b2ljZV9zb3VyY2UiOiJjdXN0b20iLCJ3b3Jrc3BhY2VfaWQiOiIxZGEwNmVhNjc5YTU0OTc1YWQ5NmEyMjIxZmU2NTMwZCIsImZpbGVuYW1lIjoiODRhMzIyNjQtZWI5OC00OTM1LWE2ODctODhhNmIxMDcyNDg5Lm1wMyIsInRpbWVzdGFtcCI6MTc5NDA3MDgwMDAwMDAwMH0%3D"
+    },
+    {
+      "voice_id": "XirH81OfTmRrNPuPRQCg",
+      "name": "Sophie - Friendly assistant",
+      "gender": "female",
+      "accent": "peninsular",
+      "locale": "es-ES",
+      "preview_url": "https://storage.googleapis.com/eleven-public-prod/database/workspace/173d82ff609d4829ae37b6fb209a8e4c/voices/XirH81OfTmRrNPuPRQCg/ZN2oXbvIky5wKoiwea6g.mp3"
+    },
+    {
+      "voice_id": "j1FA2WmkBpQd2hSw1caE",
+      "name": "Martín - Natural, Close, Friendly",
+      "gender": "male",
+      "accent": "peninsular",
+      "locale": "es-ES",
+      "preview_url": "https://storage.googleapis.com/eleven-public-prod/database/workspace/2950e38468424e5e832d40c426370584/voices/j1FA2WmkBpQd2hSw1caE/JtZSHEkz7isU8LotdEpo.mp3"
+    },
+    {
+      "voice_id": "rydssQ600JSAmdsCmuQu",
+      "name": "Katty - Warm, Natural",
+      "gender": "female",
+      "accent": "chilean",
+      "locale": "es-CL",
+      "preview_url": "https://storage.googleapis.com/eleven-public-prod/database/workspace/4bf52cb7cd9645be92c2e2e7cee79953/voices/rydssQ600JSAmdsCmuQu/SJQpeShnZDpzCoYDZXs8.mp3"
+    },
+    {
+      "voice_id": "ftg21RYfzul4HCMjaJwz",
+      "name": "Fede - Relaxed",
+      "gender": "male",
+      "accent": "argentine",
+      "locale": "es-AR",
+      "preview_url": "https://storage.googleapis.com/eleven-public-prod/database/workspace/66c8c7f5acb1495097068bba8f563b35/voices/ftg21RYfzul4HCMjaJwz/34c3fd75-c07e-46a5-9854-8e475993af42.mp3"
+    }
+  ],
+  "en": [
+    {
+      "voice_id": "6RKusXyh27gM03F5pxPX",
+      "name": "Tony - Calm & Friendly",
+      "gender": "male",
+      "accent": "american",
+      "locale": "en-US",
+      "preview_url": "https://storage.googleapis.com/eleven-public-prod/database/workspace/22a465a24a1a49b692412fe68ecc11c1/voices/6RKusXyh27gM03F5pxPX/69dbaf8f-470e-4cae-8c6e-54d7983c7ea9.mp3"
+    },
+    {
+      "voice_id": "tXkfjQ7aeWqpX1FtkPjL",
+      "name": "Elle - Versatile",
+      "gender": "male",
+      "accent": "american",
+      "locale": "en-US",
+      "preview_url": "https://api.us.elevenlabs.io/v1/voices/tXkfjQ7aeWqpX1FtkPjL/previews/audio?payload=eyJ2b2ljZV9zb3VyY2UiOiJjdXN0b20iLCJ3b3Jrc3BhY2VfaWQiOiI0Nzc2MWQwYzY3Zjc0MDFjOGQ2NTg0OTliOTVhYzFiOSIsImZpbGVuYW1lIjoiMzFjZDA3MjctNTcyZi00OTAzLWI2YWUtNTU2M2Y5NDI5ZTViLm1wMyIsInRpbWVzdGFtcCI6MTc5NDA3MDgwMDAwMDAwMH0%3D"
+    },
+    {
+      "voice_id": "GJr7Bxt1U0WeEWxRk8n6",
+      "name": "Cam - Conversational delivery",
+      "gender": "male",
+      "accent": "american",
+      "locale": "en-US",
+      "preview_url": "https://storage.googleapis.com/eleven-public-prod/database/workspace/a9eb07d5f5e24b9bb508b717f4c55051/voices/GJr7Bxt1U0WeEWxRk8n6/OeyzqUbxh3tIHIzTdeLa.mp3"
+    },
+    {
+      "voice_id": "uhN945FUORgU5g9rBLew",
+      "name": "Summer - Calm, Confident, Knowledgeable",
+      "gender": "female",
+      "accent": "us northeast",
+      "locale": "en-US",
+      "preview_url": "https://api.us.elevenlabs.io/v1/voices/uhN945FUORgU5g9rBLew/previews/audio?payload=eyJ2b2ljZV9zb3VyY2UiOiJjdXN0b20iLCJ3b3Jrc3BhY2VfaWQiOiI4MTViYmYyMzUzNWY0MWIyODI1NGUxY2MyYzhiOTg5MiIsImZpbGVuYW1lIjoiN2ZhMGE4NzMtMzBlOS00NzFjLWE3MWEtMzM4MGM0ZDUzNzY5Lm1wMyIsInRpbWVzdGFtcCI6MTc5NDA3MDgwMDAwMDAwMH0%3D"
+    },
+    {
+      "voice_id": "8DvnqWWA3WWXixOm7zQI",
+      "name": "Akshara - Warm & Natural",
+      "gender": "female",
+      "accent": "american",
+      "locale": "en-US",
+      "preview_url": "https://api.us.elevenlabs.io/v1/voices/8DvnqWWA3WWXixOm7zQI/previews/audio?payload=eyJ2b2ljZV9zb3VyY2UiOiJjdXN0b20iLCJ3b3Jrc3BhY2VfaWQiOiI4ZTFhZGIyMDFlZGI0ZWU2OWM1MjE3Mjg4NDI0MzM0NyIsImZpbGVuYW1lIjoiOGZiYTUwZTAtNDNkZS00MzkzLThlZGMtZjE3MDdiM2MzNTFiLm1wMyIsInRpbWVzdGFtcCI6MTc5NDA3MDgwMDAwMDAwMH0%3D"
+    }
+  ]
+}

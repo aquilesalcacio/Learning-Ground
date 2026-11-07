@@ -1,0 +1,95 @@
+[
+  {
+    "enabled": true,
+    "tool_config": {
+      "type": "client",
+      "name": "focus_region",
+      "description": "Pan the board to a region of the homework. Use it before talking about a problem the student can't currently see.",
+      "expects_response": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "region_id": { "type": "string", "description": "ID of the region, exactly as listed, such as p1.q3." }
+        },
+        "required": ["region_id"]
+      }
+    }
+  },
+  {
+    "enabled": true,
+    "tool_config": {
+      "type": "client",
+      "name": "circle_region",
+      "description": "Circle a region of the homework in the tutor's color. Use it as you start talking about that problem.",
+      "expects_response": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "region_id": { "type": "string", "description": "ID of the region, exactly as listed, such as p1.q3." }
+        },
+        "required": ["region_id"]
+      }
+    }
+  },
+  {
+    "enabled": true,
+    "tool_config": {
+      "type": "client",
+      "name": "draw_arrow",
+      "description": "Draw an arrow between two regions to show how they relate.",
+      "expects_response": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "from_region_id": { "type": "string", "description": "ID of the region the arrow starts at." },
+          "to_region_id": { "type": "string", "description": "ID of the region the arrow points to." },
+          "label": { "type": "string", "description": "Optional short label for the arrow, a few words at most." }
+        },
+        "required": ["from_region_id", "to_region_id"]
+      }
+    }
+  },
+  {
+    "enabled": true,
+    "tool_config": {
+      "type": "client",
+      "name": "write_text",
+      "description": "Write a short hint in the margin beside a region. Use it for hints only, never for a final answer.",
+      "expects_response": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "near_region_id": { "type": "string", "description": "ID of the region the note belongs beside." },
+          "text": { "type": "string", "description": "The note, a few words in the session's language." }
+        },
+        "required": ["near_region_id", "text"]
+      }
+    }
+  },
+  {
+    "enabled": false,
+    "tool_config": {
+      "type": "client",
+      "name": "write_math",
+      "description": "Write a short equation in the margin beside a region. Use it for hints only, never for a final answer.",
+      "expects_response": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "near_region_id": { "type": "string", "description": "ID of the region the equation belongs beside." },
+          "latex": { "type": "string", "description": "The equation as LaTeX. Never read this aloud." }
+        },
+        "required": ["near_region_id", "latex"]
+      }
+    }
+  },
+  {
+    "enabled": true,
+    "tool_config": {
+      "type": "client",
+      "name": "clear",
+      "description": "Remove the tutor's own marks from the board. The student's work stays. Use it when moving to a different problem.",
+      "expects_response": false
+    }
+  }
+]

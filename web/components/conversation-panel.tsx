@@ -2,112 +2,64 @@
 
 import { Mic, MicOff, Send } from "lucide-react";
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
-import { FieldSelect, MockBadge } from "@/components/lg-fields";
+import { FieldSelect } from "@/components/lg-fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { getActiveTutor, setActiveTutor, useLgState } from "@/lib/lg-store";
 import { COLOR_HEX } from "@/lib/lg-types";
+import { LgVoiceProvider, type LgVoiceStatus, useLgVoice } from "@/lib/lg-voice";
 
-type Status = "idle" | "listening" | "speaking";
-type Line = { id: number; who: "student" | "tutor" | "system"; text: string };
-
-const STATUS_LABEL: Record<Status, string> = {
+const STATUS_LABEL: Record<LgVoiceStatus, string> = {
   idle: "Not connected",
+  connecting: "Connecting",
   listening: "Listening",
   speaking: "Tutor speaking",
 };
 
-const MOCK_REPLY_MS = 1200;
-
 // One conversation component for Learning Grounds and Chat (vision doc, section 8.2).
-// Mocked: nothing here reaches ElevenLabs, and the browser microphone is never requested.
-export function ConversationPanel({
-  checkWorkTarget,
-  footer,
-}: {
-  checkWorkTarget?: string;
-  footer?: ReactNode;
-}) {
+function ConversationDock({ checkWorkTarget, footer }: { checkWorkTarget?: string; footer?: ReactNode }) {
   const state = useLgState();
   const tutor = getActiveTutor(state);
-  const [status, setStatus] = useState<Status>("idle");
+  const voice = useLgVoice();
   const [voiceOn, setVoiceOn] = useState(true);
-  const [muted, setMuted] = useState(false);
   const [draft, setDraft] = useState("");
-  const [lines, setLines] = useState<Line[]>([]);
-  const nextLineId = useRef(0);
-  const replyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const transcript = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    return () => {
-      if (replyTimer.current) clearTimeout(replyTimer.current);
-    };
-  }, []);
 
   useEffect(() => {
     const element = transcript.current;
     if (element) element.scrollTop = element.scrollHeight;
-  }, [lines]);
-
-  function addLine(who: Line["who"], text: string) {
-    const id = nextLineId.current++;
-    setLines((current) => [...current, { id, who, text }]);
-  }
-
-  function mockTutorReply(text: string) {
-    if (replyTimer.current) clearTimeout(replyTimer.current);
-    setStatus("speaking");
-    replyTimer.current = setTimeout(() => {
-      addLine("tutor", text);
-      setStatus("listening");
-    }, MOCK_REPLY_MS);
-  }
-
-  function toggleSession() {
-    if (status === "idle") {
-      setStatus("listening");
-      addLine("system", `Session started with ${tutor.name || "Unnamed tutor"}.`);
-      return;
-    }
-    if (replyTimer.current) clearTimeout(replyTimer.current);
-    setStatus("idle");
-    addLine("system", "Session ended.");
-  }
+  }, [voice.lines]);
 
   function switchTutor(id: string) {
-    if (replyTimer.current) clearTimeout(replyTimer.current);
+    const next = state.tutors.find((item) => item.id === id);
+    if (!next) return;
     setActiveTutor(id);
-    const name = state.tutors.find((item) => item.id === id)?.name || "Unnamed tutor";
-    // Switching ends the session and starts a new one, so the transcript starts over.
-    setLines([{ id: nextLineId.current++, who: "system", text: `Switched to ${name}. New session.` }]);
-    setStatus((current) => (current === "idle" ? "idle" : "listening"));
+    voice.switchTutor(next, !voiceOn);
   }
 
   function send(event: FormEvent) {
     event.preventDefault();
-    const text = draft.trim();
-    if (!text) return;
-    addLine("student", text);
+    const message = draft.trim();
+    if (!message || !voice.connected) return;
+    // The SDK only reports spoken student turns, so typed ones are added here.
+    voice.addLine("student", message);
+    voice.sendText(message);
     setDraft("");
-    mockTutorReply("[Mocked reply: the tutor's answer appears here.]");
   }
 
   function checkWork() {
-    addLine("system", `Check my work: ${checkWorkTarget}`);
-    mockTutorReply("[Mocked reply: feedback on the student's work appears here.]");
+    // Mocked until /check-work exists (T-801).
+    voice.addLine("system", `Check my work: ${checkWorkTarget} [Mocked: not connected yet.]`);
   }
 
   const tutorOptions = state.tutors.map((item) => ({ value: item.id, label: item.name || "Unnamed tutor" }));
+  const active = voice.status !== "idle";
 
   return (
     <section aria-label="Conversation" className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="font-medium">Conversation</h2>
-        <MockBadge />
-      </div>
+      <h2 className="font-medium">Conversation</h2>
 
       <FieldSelect
         id="conversation-tutor"
@@ -119,23 +71,28 @@ export function ConversationPanel({
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" variant={status === "idle" ? "default" : "outline"} onClick={toggleSession}>
-          {status === "idle" ? "Start session" : "End session"}
+        <Button
+          type="button"
+          variant={active ? "outline" : "default"}
+          disabled={voice.status === "connecting"}
+          onClick={() => (active ? voice.end() : voice.start(tutor, !voiceOn))}
+        >
+          {active ? "End session" : "Start session"}
         </Button>
         {voiceOn && (
           <Button
             type="button"
             variant="outline"
             size="icon"
-            aria-label={muted ? "Unmute microphone" : "Mute microphone"}
-            aria-pressed={muted}
-            onClick={() => setMuted((current) => !current)}
+            aria-label={voice.muted ? "Unmute microphone" : "Mute microphone"}
+            aria-pressed={voice.muted}
+            onClick={() => voice.setMuted(!voice.muted)}
           >
-            {muted ? <MicOff /> : <Mic />}
+            {voice.muted ? <MicOff /> : <Mic />}
           </Button>
         )}
         <div className="flex items-center gap-2">
-          <Switch id="conversation-voice" checked={voiceOn} onCheckedChange={setVoiceOn} />
+          <Switch id="conversation-voice" checked={voiceOn} disabled={active} onCheckedChange={setVoiceOn} />
           <Label htmlFor="conversation-voice">Voice</Label>
         </div>
       </div>
@@ -144,12 +101,18 @@ export function ConversationPanel({
         <span
           aria-hidden="true"
           className="size-2.5 rounded-full"
-          style={{ backgroundColor: status === "idle" ? "#a3a3a3" : COLOR_HEX[tutor.color] }}
+          style={{ backgroundColor: active ? COLOR_HEX[tutor.color] : "#a3a3a3" }}
         />
-        {STATUS_LABEL[status]}
-        {status !== "idle" && !voiceOn && " (text only)"}
-        {status !== "idle" && voiceOn && muted && " (muted)"}
+        {STATUS_LABEL[voice.status]}
+        {active && !voiceOn && " (text only)"}
+        {active && voiceOn && voice.muted && " (muted)"}
       </p>
+
+      {voice.error && (
+        <p role="alert" className="text-sm text-destructive">
+          {voice.error}
+        </p>
+      )}
 
       <div
         ref={transcript}
@@ -157,10 +120,10 @@ export function ConversationPanel({
         aria-label="Transcript"
         tabIndex={0}
       >
-        {lines.length === 0 && (
-          <p className="text-muted-foreground">Nothing yet. Start a session or type a message below.</p>
+        {voice.lines.length === 0 && (
+          <p className="text-muted-foreground">Nothing yet. Start a session, then talk or type.</p>
         )}
-        {lines.map((line) =>
+        {voice.lines.map((line) =>
           line.who === "system" ? (
             <p key={line.id} className="text-xs text-muted-foreground">
               {line.text}
@@ -183,16 +146,25 @@ export function ConversationPanel({
       <form onSubmit={send} className="flex gap-2">
         <Input
           aria-label="Message your tutor"
-          placeholder="Type a message"
+          placeholder={voice.connected ? "Type a message" : "Start a session to type"}
+          disabled={!voice.connected}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
         />
-        <Button type="submit" size="icon" aria-label="Send message">
+        <Button type="submit" size="icon" aria-label="Send message" disabled={!voice.connected}>
           <Send />
         </Button>
       </form>
 
       {footer}
     </section>
+  );
+}
+
+export function ConversationPanel(props: { checkWorkTarget?: string; footer?: ReactNode }) {
+  return (
+    <LgVoiceProvider>
+      <ConversationDock {...props} />
+    </LgVoiceProvider>
   );
 }
