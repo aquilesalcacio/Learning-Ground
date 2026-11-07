@@ -12,15 +12,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { removeLgDocument, showLgDocument } from "@/lib/lg-actions";
 import { LG_PAGES, LG_REGIONS } from "@/lib/lg-regions";
-import { setLgDocument, useLgState } from "@/lib/lg-store";
+import { getActiveDocument, useLgState } from "@/lib/lg-store";
 
 const MOCK_PROCESSING_MS = 1500;
 
 // The upload button on the chat bar. Same mocked PDF flow as Start, in a popup
 // so the student never has to leave the board to swap homework.
 export function UploadDialog() {
-  const state = useLgState();
+  const document = getActiveDocument(useLgState());
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -40,10 +41,10 @@ export function UploadDialog() {
       return;
     }
     setError("");
-    setLgDocument(null);
+    removeLgDocument();
     setProcessing(true);
     timer.current = setTimeout(() => {
-      setLgDocument({ filename: file.name, page_count: LG_PAGES.length, status: "ready" });
+      showLgDocument({ filename: file.name, page_count: LG_PAGES.length, status: "ready" });
       setProcessing(false);
     }, MOCK_PROCESSING_MS);
   }
@@ -89,16 +90,16 @@ export function UploadDialog() {
             Detecting regions...
           </p>
         )}
-        {state.document && !processing && (
+        {document && !processing && (
           <div className="grid gap-1 rounded-lg border p-3 text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-medium break-all">{state.document.filename}</span>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setLgDocument(null)}>
+              <span className="font-medium break-all">{document.filename}</span>
+              <Button type="button" variant="ghost" size="sm" onClick={removeLgDocument}>
                 Remove
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              {LG_REGIONS.length} placeholder regions across {state.document.page_count} placeholder pages. The PDF
+              {LG_REGIONS.length} placeholder regions across {document.page_count} placeholder pages. The PDF
               itself isn&apos;t read yet.
             </p>
           </div>

@@ -41,13 +41,14 @@ export type ChatMessage = {
   text: string;
 };
 
-// One run of the board with one tutor. The left sidebar lists these.
+// One run of the board with one tutor, with its own homework. The left sidebar lists these.
 export type Conversation = {
   id: string;
   tutor_id: string;
   title: string;
   created_at: number;
   messages: ChatMessage[];
+  document: LgDocument | null;
 };
 
 export type Option<T extends string> = { value: T; label: string };

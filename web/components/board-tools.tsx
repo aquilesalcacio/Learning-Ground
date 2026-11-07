@@ -30,6 +30,7 @@ import {
   undoLg,
 } from "@/lib/lg-actions";
 import { LG_PAGES } from "@/lib/lg-regions";
+import { getActiveDocument, useLgState } from "@/lib/lg-store";
 import { BACKGROUND_OPTIONS, COLOR_HEX, type LgBackground, PEN_COLORS, type PenColor } from "@/lib/lg-types";
 
 const TOOLS: { tool: LgTool; label: string; icon: LucideIcon }[] = [
@@ -45,6 +46,7 @@ const TOOLS: { tool: LgTool; label: string; icon: LucideIcon }[] = [
 // The pencil button on the left of the chat bar. Everything the board needs lives
 // behind it, so the board itself stays free of chrome.
 export function BoardTools() {
+  const hasDocument = getActiveDocument(useLgState()) !== null;
   const tool = useSyncExternalStore(subscribeLgTool, getLgTool, () => "draw" as LgTool);
   const [color, setColor] = useState<PenColor>("black");
   const [background, setBackground] = useState<LgBackground>("plain");
@@ -133,22 +135,24 @@ export function BoardTools() {
             </div>
           </div>
 
-          <div className="grid gap-1.5">
-            <span className="text-xs text-muted-foreground">Jump to page</span>
-            <div className="flex flex-wrap gap-1">
-              {LG_PAGES.map((page) => (
-                <Button
-                  key={page.number}
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => focusLgPage(page.number)}
-                >
-                  {page.number}
-                </Button>
-              ))}
+          {hasDocument && (
+            <div className="grid gap-1.5">
+              <span className="text-xs text-muted-foreground">Jump to page</span>
+              <div className="flex flex-wrap gap-1">
+                {LG_PAGES.map((page) => (
+                  <Button
+                    key={page.number}
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => focusLgPage(page.number)}
+                  >
+                    {page.number}
+                  </Button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           <Separator />
 

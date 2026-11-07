@@ -12,9 +12,12 @@ export type LgState = {
   tutors: Tutor[];
   active_tutor_id: string;
   profile: StudentProfile;
-  document: LgDocument | null;
   conversations: Conversation[];
+  // Null means the start screen is showing.
   active_conversation_id: string | null;
+  // The ID the next chat will take. The start screen's board is already saved under it,
+  // so whatever the student draws there carries over when the chat begins.
+  draft_id: string;
 };
 
 function preset(id: string, name: string, color: Tutor["color"], language: Tutor["language"], tone: Tutor["tone"]): Tutor {
@@ -30,9 +33,9 @@ const DEFAULT_STATE: LgState = {
   ],
   active_tutor_id: "prof-ana",
   profile: { name: "", school: "", courses: "", language: "", struggles: "" },
-  document: null,
   conversations: [],
   active_conversation_id: null,
+  draft_id: "",
 };
 
 let cached: LgState | null = null;
@@ -46,16 +49,25 @@ export function readLgState(): LgState {
   } catch {
     cached = DEFAULT_STATE;
   }
+  const loaded = cached as LgState;
+  if (!loaded.draft_id) {
+    cached = { ...loaded, draft_id: crypto.randomUUID() };
+    saveLgState(cached);
+  }
   return cached as LgState;
 }
 
-function writeLgState(next: LgState) {
-  cached = next;
+function saveLgState(next: LgState) {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   } catch {
     // Private windows can refuse storage. The app keeps working for this session.
   }
+}
+
+function writeLgState(next: LgState) {
+  cached = next;
+  saveLgState(next);
   listeners.forEach((listener) => listener());
 }
 
@@ -122,8 +134,20 @@ export function updateProfile(patch: Partial<StudentProfile>) {
   writeLgState({ ...state, profile: { ...state.profile, ...patch } });
 }
 
+export function getActiveDocument(state: LgState): LgDocument | null {
+  return getActiveConversation(state)?.document ?? null;
+}
+
+// Adding homework begins a chat, if one hasn't begun already.
 export function setLgDocument(document: LgDocument | null) {
-  writeLgState({ ...readLgState(), document });
+  const active = readLgState().active_conversation_id;
+  if (!active && !document) return;
+  const id = active ?? startConversation();
+  const state = readLgState();
+  writeLgState({
+    ...state,
+    conversations: state.conversations.map((item) => (item.id === id ? { ...item, document } : item)),
+  });
 }
 
 export function getActiveConversation(state: LgState): Conversation | null {
@@ -137,20 +161,43 @@ export function sortedConversations(state: LgState): Conversation[] {
 
 export function startConversation(tutor_id?: string): string {
   const state = readLgState();
-  const id = crypto.randomUUID();
+  const id = state.draft_id;
   const conversation: Conversation = {
     id,
     tutor_id: tutor_id ?? state.active_tutor_id,
     title: "",
     created_at: Date.now(),
     messages: [],
+    document: null,
   };
   writeLgState({
     ...state,
     conversations: [...state.conversations, conversation],
     active_conversation_id: id,
+    draft_id: crypto.randomUUID(),
   });
   return id;
+}
+
+// Back to the start screen. No chat is recorded until the student does something.
+export function newChat() {
+  writeLgState({ ...readLgState(), active_conversation_id: null });
+}
+
+export function setConversationTutor(id: string, tutor_id: string) {
+  const state = readLgState();
+  writeLgState({
+    ...state,
+    conversations: state.conversations.map((item) => (item.id === id ? { ...item, tutor_id } : item)),
+  });
+}
+
+export function conversationTitle(conversation: Conversation): string {
+  return conversation.title || conversation.document?.filename || "New chat";
+}
+
+export function boardPersistenceKey(conversation_id: string): string {
+  return `lg-board-${conversation_id}`;
 }
 
 export function setActiveConversation(id: string) {
@@ -172,6 +219,8 @@ export function deleteConversation(id: string) {
     conversations,
     active_conversation_id: state.active_conversation_id === id ? null : state.active_conversation_id,
   });
+  // tldraw names its database this way, in LocalIndexedDb.js. Check this if tldraw is upgraded.
+  window.indexedDB?.deleteDatabase(`TLDRAW_DOCUMENT_v2${boardPersistenceKey(id)}`);
 }
 
 export function appendMessage(conversation_id: string, who: ChatSpeaker, text: string) {

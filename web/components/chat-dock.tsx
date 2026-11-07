@@ -13,13 +13,14 @@ import {
   type LgState,
   readLgState,
   setActiveTutor,
+  setConversationTutor,
   startConversation,
 } from "@/lib/lg-store";
 import { COLOR_HEX } from "@/lib/lg-types";
 import { LgVoiceProvider, useLgVoice } from "@/lib/lg-voice";
 
 // The only chrome over the board: a tutor pill, the recent transcript, and one bar.
-function Dock({ state }: { state: LgState }) {
+function Dock({ state, boardId }: { state: LgState; boardId: string }) {
   const tutor = getActiveTutor(state);
   const conversation = getActiveConversation(state);
   const [draft, setDraft] = useState("");
@@ -66,7 +67,9 @@ function Dock({ state }: { state: LgState }) {
     // Typing needs no setup: the first message opens a text session. The draft stays if that fails.
     if (status === "idle" && !beginSession(true)) return;
     // The SDK only reports spoken student turns, so typed ones are added here.
-    voice.addLine("student", text);
+    sessionConversation.current ??= startConversation();
+    appendMessage(sessionConversation.current, "student", text);
+    setTranscriptOpen(true);
     voice.sendWhenReady(text);
     setDraft("");
   }
@@ -75,8 +78,10 @@ function Dock({ state }: { state: LgState }) {
     const next = state.tutors.find((item) => item.id === id);
     if (!next || id === tutor.id) return;
     setActiveTutor(id);
-    // A new tutor means a new session, so the old chat stays intact in history.
-    sessionConversation.current = startConversation(id);
+    // A chat with messages stays intact in history, and the new tutor gets a new one.
+    // Before any message, homework and drawings just stay where they are with the new tutor.
+    if (conversation?.messages.length) sessionConversation.current = startConversation(id);
+    else if (conversation) setConversationTutor(conversation.id, id);
     voice.switchTutor(next, voice.textOnly);
   }
 
@@ -165,11 +170,12 @@ function Dock({ state }: { state: LgState }) {
         onSubmit={send}
         className="pointer-events-auto flex w-full max-w-2xl items-center gap-1 rounded-full border bg-background/95 p-1.5 shadow-lg backdrop-blur"
       >
-        <BoardTools />
+        {/* Keyed so the menu's color and background start fresh along with each chat's board. */}
+        <BoardTools key={boardId} />
         <UploadDialog />
         <input
           aria-label="Message your tutor"
-          placeholder={`Ask ${tutor.name || "your tutor"} about this page`}
+          placeholder={`Ask ${tutor.name || "your tutor"}${conversation?.document ? " about this page" : " anything"}`}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           className="min-w-0 flex-1 bg-transparent px-2 text-sm outline-none placeholder:text-muted-foreground"
@@ -231,10 +237,16 @@ function Dock({ state }: { state: LgState }) {
   );
 }
 
-export function ChatDock({ state }: { state: LgState }) {
+export function ChatDock({ state, boardId }: { state: LgState; boardId: string }) {
+  // Next keeps this page alive but hidden while the student is on another page. The session
+  // ends then and the SDK stops tracking it, so its status would stay stuck on "connected".
+  // Remounting gives each return a clean dock, including its menus.
+  const [visit, setVisit] = useState(0);
+  useEffect(() => () => setVisit((current) => current + 1), []);
+
   return (
-    <LgVoiceProvider>
-      <Dock state={state} />
+    <LgVoiceProvider key={visit}>
+      <Dock state={state} boardId={boardId} />
     </LgVoiceProvider>
   );
 }

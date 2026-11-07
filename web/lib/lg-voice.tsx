@@ -4,13 +4,12 @@ import { type ClientTools, ConversationProvider, useConversation } from "@eleven
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import { applyLgAction, type LgAction } from "./lg-actions";
 import { findVoice } from "./lg-voices";
-import type { Tutor } from "./lg-types";
+import type { ChatSpeaker, Tutor } from "./lg-types";
 
 // Temporary for the G1 test: a public agent needs only its ID. T-203 replaces this with a server token.
 const AGENT_ID = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID ?? "";
 
 export type LgVoiceStatus = "idle" | "connecting" | "listening" | "speaking";
-export type LgVoiceLine = { id: number; who: "student" | "tutor" | "system"; text: string };
 type SessionRequest = { tutor: Tutor; textOnly: boolean };
 
 function act(name: string, parameters: Record<string, unknown>, action: LgAction) {
@@ -55,24 +54,16 @@ export function LgVoiceProvider({ children }: { children: ReactNode }) {
 }
 
 // UI-free session state for the voice dock. Must be used inside LgVoiceProvider.
-// onLine lets a caller keep its own record of the session, such as the chat history.
-export function useLgVoice({ onLine }: { onLine?: (who: LgVoiceLine["who"], text: string) => void } = {}) {
-  const [lines, setLines] = useState<LgVoiceLine[]>([]);
+// Every line of the session goes to onLine, which keeps the record of it.
+export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string) => void }) {
   const [error, setError] = useState("");
   const [textOnly, setTextOnly] = useState(false);
   const [restarting, setRestarting] = useState(false);
-  const nextLineId = useRef(0);
   const restart = useRef<SessionRequest | null>(null);
   const pendingText = useRef<string[]>([]);
 
-  function addLine(who: LgVoiceLine["who"], line: string) {
-    const id = nextLineId.current++;
-    setLines((current) => [...current, { id, who, text: line }]);
-    onLine?.(who, line);
-  }
-
   const conversation = useConversation({
-    onMessage: ({ message, role }) => addLine(role === "user" ? "student" : "tutor", message),
+    onMessage: ({ message, role }) => onLine(role === "user" ? "student" : "tutor", message),
     onConnect: () => {
       for (const message of pendingText.current) conversation.sendUserMessage(message);
       pendingText.current = [];
@@ -92,7 +83,7 @@ export function useLgVoice({ onLine }: { onLine?: (who: LgVoiceLine["who"], text
         conversation.startSession(sessionOptions(next));
       } else {
         pendingText.current = [];
-        addLine("system", "Session ended.");
+        onLine("system", "Session ended.");
       }
     },
   });
@@ -116,7 +107,7 @@ export function useLgVoice({ onLine }: { onLine?: (who: LgVoiceLine["who"], text
     }
     setError("");
     setTextOnly(nextTextOnly);
-    addLine("system", `Session started with ${tutor.name || "Unnamed tutor"}.`);
+    onLine("system", `Session started with ${tutor.name || "Unnamed tutor"}.`);
     conversation.startSession(sessionOptions({ tutor, textOnly: nextTextOnly }));
     return true;
   }
@@ -131,9 +122,7 @@ export function useLgVoice({ onLine }: { onLine?: (who: LgVoiceLine["who"], text
   }
 
   function switchTutor(tutor: Tutor, nextTextOnly: boolean) {
-    const name = tutor.name || "Unnamed tutor";
     pendingText.current = [];
-    setLines([{ id: nextLineId.current++, who: "system", text: `Switched to ${name}. New session.` }]);
     if (status === "idle") return;
     restartSession(tutor, nextTextOnly);
   }
@@ -155,14 +144,11 @@ export function useLgVoice({ onLine }: { onLine?: (who: LgVoiceLine["who"], text
     status,
     connected,
     textOnly,
-    lines,
     error,
-    addLine,
     start,
     restartSession,
     switchTutor,
     end,
-    sendText: conversation.sendUserMessage,
     sendWhenReady,
     muted: conversation.isMuted,
     setMuted: conversation.setMuted,

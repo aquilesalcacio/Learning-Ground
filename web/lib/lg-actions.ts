@@ -18,8 +18,8 @@ import {
   regionFocusBounds,
   regionMarginX,
 } from "./lg-regions";
-import { getActiveTutor, readLgState } from "./lg-store";
-import type { LgBackground, PenColor } from "./lg-types";
+import { getActiveDocument, getActiveTutor, readLgState, setLgDocument, startConversation } from "./lg-store";
+import type { LgBackground, LgDocument, PenColor } from "./lg-types";
 
 // The seam between the board and the voice session (vision doc, section 8.1).
 // Voice client tools and the test buttons both call applyLgAction and nothing else.
@@ -86,6 +86,11 @@ export function applyLgAction(action: LgAction) {
   const editor = lgEditor;
   if (!editor) {
     console.warn("[lg] No board is open, so this action did nothing:", action);
+    return;
+  }
+  // Regions live on the homework pages. Without any, the tutor would mark empty space.
+  if (action.type !== "clear" && !getActiveDocument(readLgState())) {
+    console.warn("[lg] No homework is open, so this action did nothing:", action);
     return;
   }
 
@@ -228,10 +233,14 @@ export function setLgBackground(background: LgBackground) {
 
 export function focusLgPage(number: number) {
   const page = LG_PAGES.find((item) => item.number === number);
-  if (page) lgEditor?.zoomToBounds(pageFocusBounds(page), { inset: FOCUS_INSET, animation: { duration: 300 } });
+  if (page && getActiveDocument(readLgState())) lgEditor?.zoomToBounds(pageFocusBounds(page), { inset: FOCUS_INSET, animation: { duration: 300 } });
 }
 
-function drawLockedPages(editor: Editor, filename: string | null) {
+function lockedShapes(editor: Editor) {
+  return editor.getCurrentPageShapes().filter((shape) => shape.meta.kind === "page" || shape.meta.kind === "region");
+}
+
+function drawLockedPages(editor: Editor, filename: string) {
   const pageShapes: TLShapePartial[] = LG_PAGES.map((page) => ({
     id: createShapeId(`lg-page-${page.number}`),
     type: "geo",
@@ -251,7 +260,7 @@ function drawLockedPages(editor: Editor, filename: string | null) {
       font: "sans",
       align: "start",
       verticalAlign: "start",
-      richText: toRichText(`Page ${page.number}: ${filename ?? "no homework uploaded"} (placeholder)`),
+      richText: toRichText(`Page ${page.number}: ${filename} (placeholder)`),
     },
   }));
 
@@ -281,18 +290,57 @@ function drawLockedPages(editor: Editor, filename: string | null) {
     };
   });
 
-  editor.createShapes([...pageShapes, ...regionShapes]);
+  // Kept out of the undo history, so undoing a stroke can't take the homework with it.
+  editor.run(() => editor.createShapes([...pageShapes, ...regionShapes]), { history: "ignore" });
 }
 
-export function bindLearningGrounds(editor: Editor, filename: string | null) {
+function removeLockedPages(editor: Editor) {
+  const shapes = lockedShapes(editor);
+  editor.run(() => editor.deleteShapes(shapes), { history: "ignore", ignoreShapeLock: true });
+}
+
+export function showLgDocument(document: LgDocument) {
+  setLgDocument(document);
+  const editor = lgEditor;
+  if (!editor) return;
+  removeLockedPages(editor);
+  drawLockedPages(editor, document.filename);
+  focusLgPage(1);
+}
+
+export function removeLgDocument() {
+  setLgDocument(null);
+  if (lgEditor) removeLockedPages(lgEditor);
+}
+
+// The student's first stroke on the start screen begins a chat. Pages and tutor marks carry
+// a meta tag and only appear once a chat has begun, so they never trigger this.
+function startChatOnFirstMark(editor: Editor) {
+  return editor.store.listen(
+    ({ changes }) => {
+      if (readLgState().active_conversation_id) return;
+      const marked = Object.values(changes.added).some(
+        (record) => record.typeName === "shape" && !record.meta.kind && !record.meta.author,
+      );
+      if (marked) startConversation();
+    },
+    { source: "user", scope: "document" },
+  );
+}
+
+export function bindLearningGrounds(editor: Editor) {
   lgEditor = editor;
-  drawLockedPages(editor, filename);
+  // A saved board already has its pages, so they are only drawn if they are missing.
+  const document = getActiveDocument(readLgState());
+  if (document && lockedShapes(editor).length === 0) drawLockedPages(editor, document.filename);
   setLgBackground("plain");
   editor.setCurrentTool("draw");
   focusLgPage(1);
   const stopWatchingTool = react("lg current tool", () => setToolFromEditor(editor));
+  const stopWatchingMarks = startChatOnFirstMark(editor);
   return () => {
     stopWatchingTool();
+    stopWatchingMarks();
     if (lgEditor === editor) lgEditor = null;
   };
 }
