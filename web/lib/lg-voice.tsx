@@ -1,7 +1,7 @@
 "use client";
 
 import { type ClientTools, ConversationProvider, useConversation } from "@elevenlabs/react";
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useCallback, useRef, useState } from "react";
 import { applyLgAction, type LgAction } from "./lg-actions";
 import { findVoice } from "./lg-voices";
 import type { Tutor } from "./lg-types";
@@ -55,71 +55,115 @@ export function LgVoiceProvider({ children }: { children: ReactNode }) {
 }
 
 // UI-free session state for the voice dock. Must be used inside LgVoiceProvider.
-export function useLgVoice() {
+// onLine lets a caller keep its own record of the session, such as the chat history.
+export function useLgVoice({ onLine }: { onLine?: (who: LgVoiceLine["who"], text: string) => void } = {}) {
   const [lines, setLines] = useState<LgVoiceLine[]>([]);
   const [error, setError] = useState("");
+  const [textOnly, setTextOnly] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const nextLineId = useRef(0);
   const restart = useRef<SessionRequest | null>(null);
+  const pendingText = useRef<string[]>([]);
 
   function addLine(who: LgVoiceLine["who"], line: string) {
     const id = nextLineId.current++;
     setLines((current) => [...current, { id, who, text: line }]);
+    onLine?.(who, line);
   }
 
   const conversation = useConversation({
     onMessage: ({ message, role }) => addLine(role === "user" ? "student" : "tutor", message),
+    onConnect: () => {
+      for (const message of pendingText.current) conversation.sendUserMessage(message);
+      pendingText.current = [];
+    },
     onError: (message) => {
       console.error("[lg-voice]", message);
+      pendingText.current = [];
       setError(message);
     },
     onModeChange: ({ mode }) => console.log(`[lg-voice] ${new Date().toISOString()} mode ${mode}`),
     onDisconnect: () => {
       const next = restart.current;
       restart.current = null;
+      setRestarting(false);
       // Language is fixed for a call, so a tutor switch ends the session and starts a new one.
-      if (next) conversation.startSession(sessionOptions(next));
-      else addLine("system", "Session ended.");
+      if (next) {
+        conversation.startSession(sessionOptions(next));
+      } else {
+        pendingText.current = [];
+        addLine("system", "Session ended.");
+      }
     },
   });
 
+  const { endSession } = conversation;
   const connected = conversation.status === "connected";
 
   const status: LgVoiceStatus = connected
     ? conversation.isSpeaking
       ? "speaking"
       : "listening"
-    : conversation.status === "connecting"
+    : conversation.status === "connecting" || restarting
       ? "connecting"
       : "idle";
 
-  function start(tutor: Tutor, textOnly: boolean) {
+  // Returns false when no session could be started.
+  function start(tutor: Tutor, nextTextOnly: boolean) {
     if (!AGENT_ID) {
       setError("NEXT_PUBLIC_ELEVENLABS_AGENT_ID is missing from web/.env.local.");
-      return;
+      return false;
     }
     setError("");
+    setTextOnly(nextTextOnly);
     addLine("system", `Session started with ${tutor.name || "Unnamed tutor"}.`);
-    conversation.startSession(sessionOptions({ tutor, textOnly }));
+    conversation.startSession(sessionOptions({ tutor, textOnly: nextTextOnly }));
+    return true;
   }
 
-  function switchTutor(tutor: Tutor, textOnly: boolean) {
+  // Replaces the live session, because tutor, language and text-only mode are fixed for a call.
+  function restartSession(tutor: Tutor, nextTextOnly: boolean) {
+    setError("");
+    setTextOnly(nextTextOnly);
+    setRestarting(true);
+    restart.current = { tutor, textOnly: nextTextOnly };
+    endSession();
+  }
+
+  function switchTutor(tutor: Tutor, nextTextOnly: boolean) {
     const name = tutor.name || "Unnamed tutor";
+    pendingText.current = [];
     setLines([{ id: nextLineId.current++, who: "system", text: `Switched to ${name}. New session.` }]);
     if (status === "idle") return;
-    restart.current = { tutor, textOnly };
-    conversation.endSession();
+    restartSession(tutor, nextTextOnly);
   }
+
+  // Sends now, or as soon as the session that is still connecting opens.
+  function sendWhenReady(message: string) {
+    if (connected) conversation.sendUserMessage(message);
+    else pendingText.current.push(message);
+  }
+
+  const end = useCallback(() => {
+    restart.current = null;
+    pendingText.current = [];
+    setRestarting(false);
+    endSession();
+  }, [endSession]);
 
   return {
     status,
     connected,
+    textOnly,
     lines,
     error,
     addLine,
     start,
+    restartSession,
     switchTutor,
-    end: conversation.endSession,
+    end,
     sendText: conversation.sendUserMessage,
+    sendWhenReady,
     muted: conversation.isMuted,
     setMuted: conversation.setMuted,
   };

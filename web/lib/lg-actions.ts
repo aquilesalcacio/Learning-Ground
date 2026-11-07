@@ -4,6 +4,7 @@ import {
   createShapeId,
   DefaultColorStyle,
   type Editor,
+  react,
   type TLShapePartial,
   toRichText,
 } from "tldraw";
@@ -169,6 +170,53 @@ export function setLgRegionsVisible(visible: boolean) {
 
 export function setLgPenColor(color: PenColor) {
   lgEditor?.setStyleForNextShapes(DefaultColorStyle, color);
+  // Recolor an existing selection too, so picking a color after selecting works.
+  const editor = lgEditor;
+  if (editor && editor.getSelectedShapeIds().length > 0) {
+    editor.setStyleForSelectedShapes(DefaultColorStyle, color);
+  }
+}
+
+// The tools the floating pencil menu exposes (vision doc, section 4.1).
+export const LG_TOOLS = ["select", "hand", "draw", "eraser", "text", "arrow", "laser"] as const;
+export type LgTool = (typeof LG_TOOLS)[number];
+
+function isLgTool(id: string): id is LgTool {
+  return (LG_TOOLS as readonly string[]).includes(id);
+}
+
+// The pencil menu reads the tool from the editor rather than tracking its own,
+// so tldraw's keyboard shortcuts keep the menu honest.
+let lgTool: LgTool = "draw";
+const toolListeners = new Set<() => void>();
+
+export function getLgTool(): LgTool {
+  return lgTool;
+}
+
+export function subscribeLgTool(listener: () => void) {
+  toolListeners.add(listener);
+  return () => toolListeners.delete(listener);
+}
+
+function setToolFromEditor(editor: Editor) {
+  const id = editor.getCurrentToolId();
+  const next = isLgTool(id) ? id : lgTool;
+  if (next === lgTool) return;
+  lgTool = next;
+  toolListeners.forEach((listener) => listener());
+}
+
+export function setLgTool(tool: LgTool) {
+  lgEditor?.setCurrentTool(tool);
+}
+
+export function undoLg() {
+  lgEditor?.undo();
+}
+
+export function redoLg() {
+  lgEditor?.redo();
 }
 
 export function setLgBackground(background: LgBackground) {
@@ -242,7 +290,9 @@ export function bindLearningGrounds(editor: Editor, filename: string | null) {
   setLgBackground("plain");
   editor.setCurrentTool("draw");
   focusLgPage(1);
+  const stopWatchingTool = react("lg current tool", () => setToolFromEditor(editor));
   return () => {
+    stopWatchingTool();
     if (lgEditor === editor) lgEditor = null;
   };
 }

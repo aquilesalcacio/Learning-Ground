@@ -15,6 +15,9 @@ const LINKS = [
 export function AppNav() {
   const pathname = usePathname();
 
+  // The board is full-bleed. Its own left sidebar carries these links instead.
+  if (pathname.startsWith("/learning-grounds")) return null;
+
   return (
     <header className="flex min-h-14 flex-wrap items-center gap-x-6 gap-y-1 border-b px-4 py-2">
       <Link href="/" className="font-semibold">

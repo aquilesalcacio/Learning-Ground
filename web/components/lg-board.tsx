@@ -4,6 +4,8 @@ import { type TLComponents, Tldraw } from "tldraw";
 import "tldraw/tldraw.css";
 import { bindLearningGrounds } from "@/lib/lg-actions";
 
+// Every piece of tldraw's own chrome is off. The chat dock's pencil menu is the
+// only toolbar, which is what leaves the page itself uncluttered.
 const components: TLComponents = {
   MainMenu: null,
   PageMenu: null,
@@ -11,8 +13,16 @@ const components: TLComponents = {
   DebugMenu: null,
   DebugPanel: null,
   SharePanel: null,
-  // The MVP customizes background and pen color only, from the side panel (vision doc, section 4.1).
   StylePanel: null,
+  Toolbar: null,
+  NavigationPanel: null,
+  ActionsMenu: null,
+  QuickActions: null,
+  ZoomMenu: null,
+  MenuPanel: null,
+  TopPanel: null,
+  HelperButtons: null,
+  Minimap: null,
 };
 
 // tldraw only appears here and in lib/lg-actions.ts, which keeps a library switch contained.

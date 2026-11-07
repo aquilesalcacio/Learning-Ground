@@ -1,16 +1,20 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import type { LgDocument, StudentProfile, Tutor } from "./lg-types";
+import type { ChatMessage, ChatSpeaker, Conversation, LgDocument, StudentProfile, Tutor } from "./lg-types";
 
 // Browser-only storage for the mock. FastAPI and Postgres replace this later.
 const STORAGE_KEY = "lg-state-v1";
+
+const TITLE_MAX = 48;
 
 export type LgState = {
   tutors: Tutor[];
   active_tutor_id: string;
   profile: StudentProfile;
   document: LgDocument | null;
+  conversations: Conversation[];
+  active_conversation_id: string | null;
 };
 
 function preset(id: string, name: string, color: Tutor["color"], language: Tutor["language"], tone: Tutor["tone"]): Tutor {
@@ -27,6 +31,8 @@ const DEFAULT_STATE: LgState = {
   active_tutor_id: "prof-ana",
   profile: { name: "", school: "", courses: "", language: "", struggles: "" },
   document: null,
+  conversations: [],
+  active_conversation_id: null,
 };
 
 let cached: LgState | null = null;
@@ -118,4 +124,66 @@ export function updateProfile(patch: Partial<StudentProfile>) {
 
 export function setLgDocument(document: LgDocument | null) {
   writeLgState({ ...readLgState(), document });
+}
+
+export function getActiveConversation(state: LgState): Conversation | null {
+  return state.conversations.find((item) => item.id === state.active_conversation_id) ?? null;
+}
+
+// Newest first, which is the order the history sidebar shows them in.
+export function sortedConversations(state: LgState): Conversation[] {
+  return [...state.conversations].sort((a, b) => b.created_at - a.created_at);
+}
+
+export function startConversation(tutor_id?: string): string {
+  const state = readLgState();
+  const id = crypto.randomUUID();
+  const conversation: Conversation = {
+    id,
+    tutor_id: tutor_id ?? state.active_tutor_id,
+    title: "",
+    created_at: Date.now(),
+    messages: [],
+  };
+  writeLgState({
+    ...state,
+    conversations: [...state.conversations, conversation],
+    active_conversation_id: id,
+  });
+  return id;
+}
+
+export function setActiveConversation(id: string) {
+  const state = readLgState();
+  const conversation = state.conversations.find((item) => item.id === id);
+  if (!conversation) return;
+  // Opening a past chat also restores the tutor it was held with.
+  const active_tutor_id = state.tutors.some((tutor) => tutor.id === conversation.tutor_id)
+    ? conversation.tutor_id
+    : state.active_tutor_id;
+  writeLgState({ ...state, active_conversation_id: id, active_tutor_id });
+}
+
+export function deleteConversation(id: string) {
+  const state = readLgState();
+  const conversations = state.conversations.filter((item) => item.id !== id);
+  writeLgState({
+    ...state,
+    conversations,
+    active_conversation_id: state.active_conversation_id === id ? null : state.active_conversation_id,
+  });
+}
+
+export function appendMessage(conversation_id: string, who: ChatSpeaker, text: string) {
+  const state = readLgState();
+  const message: ChatMessage = { id: crypto.randomUUID(), who, text };
+  writeLgState({
+    ...state,
+    conversations: state.conversations.map((item) => {
+      if (item.id !== conversation_id) return item;
+      // The first thing the student says names the chat in the sidebar.
+      const title = item.title || (who === "student" ? text.slice(0, TITLE_MAX) : "");
+      return { ...item, title, messages: [...item.messages, message] };
+    }),
+  });
 }
