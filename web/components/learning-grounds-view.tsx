@@ -1,35 +1,26 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { BoardFiles } from "@/components/board-files";
 import { ChatDock } from "@/components/chat-dock";
 import { useHydrated, useLgState } from "@/lib/lg-store";
 
-const LgBoard = dynamic(() => import("@/components/lg-board"), {
-  ssr: false,
-  loading: () => <p className="p-4 text-sm text-muted-foreground">Loading board...</p>,
-});
+const LgBoard = dynamic(() => import("@/components/lg-board"), { ssr: false });
 
-// The start screen and the working board are one screen. A chat begins with the first
-// message, upload or stroke, and the greeting leaves with the same board still underneath.
+// The start screen and the working board are one screen. The tutor orb sits in the middle
+// until a chat begins (first message, upload, stroke or voice session), then docks in the
+// corner with the same board still underneath. The board is see-through, so the app's dot
+// grid shows behind the student's work.
 export function LearningGroundsView() {
   const state = useLgState();
   const hydrated = useHydrated();
   const boardId = state.active_conversation_id ?? state.draft_id;
-  const name = state.profile.name.trim();
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden">
+    <div className="@container relative min-h-0 flex-1 overflow-hidden">
       {hydrated && <LgBoard key={boardId} boardId={boardId} />}
-
-      {hydrated && !state.active_conversation_id && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-6 pb-32">
-          <h1 className="text-center text-3xl font-semibold text-balance">
-            {name ? `Hi ${name}, what are we working on?` : "What are we working on?"}
-          </h1>
-        </div>
-      )}
-
-      <ChatDock state={state} boardId={boardId} />
+      {hydrated && <BoardFiles />}
+      {hydrated && <ChatDock state={state} boardId={boardId} />}
     </div>
   );
 }

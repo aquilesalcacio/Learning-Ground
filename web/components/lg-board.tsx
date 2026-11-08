@@ -6,8 +6,12 @@ import { bindLearningGrounds } from "@/lib/lg-actions";
 import { boardPersistenceKey } from "@/lib/lg-store";
 
 // Every piece of tldraw's own chrome is off. The chat dock's pencil menu is the
-// only toolbar, which is what leaves the page itself uncluttered.
+// only toolbar, which is what leaves the page itself uncluttered. Background and
+// LoadingScreen are off too, so the board is see-through and the app's dot grid
+// stays behind the student's work.
 const components: TLComponents = {
+  Background: null,
+  LoadingScreen: null,
   MainMenu: null,
   PageMenu: null,
   HelpMenu: null,

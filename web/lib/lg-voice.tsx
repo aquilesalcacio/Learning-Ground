@@ -1,6 +1,13 @@
 "use client";
 
-import { type ClientTools, ConversationProvider, useConversation } from "@elevenlabs/react";
+import {
+  type ClientTools,
+  ConversationProvider,
+  useConversation,
+  useConversationControls,
+  useConversationMode,
+  useConversationStatus,
+} from "@elevenlabs/react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import { applyLgAction, type LgAction } from "./lg-actions";
 import { checkStudentWork, type WorkCheck, workReport } from "./lg-check-work";
@@ -87,6 +94,22 @@ function sessionOptions({ tutor, textOnly }: SessionRequest) {
 
 export function LgVoiceProvider({ children }: { children: ReactNode }) {
   return <ConversationProvider clientTools={clientTools}>{children}</ConversationProvider>;
+}
+
+// Read-only: what the tutor orb needs to move with the session. It never starts, ends or changes
+// a session, so it can sit anywhere inside LgVoiceProvider next to the component using useLgVoice.
+// The getters return 0 to 1, and 0 when no session is live; call them each animation frame.
+export function useLgVoiceLevels() {
+  const { status } = useConversationStatus();
+  const { isSpeaking } = useConversationMode();
+  const { getOutputVolume, getInputVolume } = useConversationControls();
+  const live = status === "connected";
+  return {
+    live,
+    speaking: live && isSpeaking,
+    getOutputLevel: getOutputVolume,
+    getInputLevel: getInputVolume,
+  };
 }
 
 // UI-free session state for the voice dock. Must be used inside LgVoiceProvider.

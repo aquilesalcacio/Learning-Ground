@@ -1,6 +1,6 @@
 "use client";
 
-import { Paperclip, Upload } from "lucide-react";
+import { FileText, Paperclip, Trash2, Upload } from "lucide-react";
 import { type ChangeEvent, type DragEvent, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,12 +14,13 @@ import {
 import {
   getIdleLgUpload,
   getLgUpload,
-  removeLgDocument,
+  removeLgFile,
   retryLgReading,
   subscribeLgUpload,
   uploadLgHomework,
 } from "@/lib/lg-actions";
 import { MAX_FILE_BYTES, MAX_PAGES } from "@/lib/lg-document";
+import { documentFiles } from "@/lib/lg-regions";
 import { getActiveDocument, useLgState } from "@/lib/lg-store";
 
 const ACCEPT = "application/pdf,.pdf,image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp";
@@ -41,7 +42,8 @@ function unreadPages(numbers: number[], total: number) {
 }
 
 // The upload button on the chat bar. The pages open on the board behind this popup first,
-// then Gemini reads them one at a time, so the student never has to leave the board.
+// then Gemini reads them one at a time, so the student never has to leave the board. Each file
+// added goes beside the ones already there, in the same chat.
 export function UploadDialog() {
   const state = useLgState();
   const document = getActiveDocument(state);
@@ -54,6 +56,7 @@ export function UploadDialog() {
   const reading = mine && upload.busy === "reading";
   const error = mine ? upload.error : "";
 
+  const files = document ? documentFiles(document) : [];
   const failedPages = document?.pages.filter((page) => page.read === "failed") ?? [];
   const problems = document?.regions.filter((item) => !item.region_id.endsWith(".page")).length ?? 0;
 
@@ -92,8 +95,8 @@ export function UploadDialog() {
         <div className="grid gap-1">
           <DialogTitle>Upload homework</DialogTitle>
           <DialogDescription>
-            A PDF or a photo, up to {MAX_PAGES} pages and {MAX_FILE_BYTES / (1024 * 1024)} MB. It opens on the board
-            behind this popup.
+            PDFs or photos, up to {MAX_PAGES} pages and {MAX_FILE_BYTES / (1024 * 1024)} MB each. Each file opens
+            beside the others on the board behind this popup.
           </DialogDescription>
         </div>
 
@@ -104,7 +107,7 @@ export function UploadDialog() {
           className="flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-dashed p-8 text-center focus-within:ring-2 focus-within:ring-ring aria-disabled:cursor-wait aria-disabled:opacity-60"
         >
           <Upload aria-hidden="true" className="size-5 text-muted-foreground" />
-          <span className="font-medium">Choose a PDF or photo</span>
+          <span className="font-medium">{document ? "Add another PDF or photo" : "Choose a PDF or photo"}</span>
           <span className="text-xs text-muted-foreground">or drop one on this box</span>
           <input type="file" accept={ACCEPT} className="sr-only" disabled={opening} onChange={onFile} />
         </label>
@@ -120,13 +123,31 @@ export function UploadDialog() {
           </p>
         )}
         {document && !opening && (
-          <div className="grid gap-1 rounded-lg border p-3 text-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-medium break-all">{document.filename}</span>
-              <Button type="button" variant="ghost" size="sm" onClick={removeLgDocument}>
-                Remove
-              </Button>
-            </div>
+          <div className="grid gap-2 text-sm">
+            <ul aria-label="Files in this chat" className="grid gap-1.5">
+              {files.map((file) => (
+                <li
+                  key={file.id}
+                  className="flex items-center gap-2.5 rounded-2xl bg-white/60 py-1.5 pr-1.5 pl-3 ring-1 ring-black/5 duration-300 animate-in fade-in-0 slide-in-from-bottom-1"
+                >
+                  <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium">{file.filename}</span>
+                    <span className="block text-xs text-muted-foreground">{plural(file.page_count, "page")}</span>
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Remove ${file.filename}`}
+                    className="rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => removeLgFile(file.id)}
+                  >
+                    <Trash2 />
+                  </Button>
+                </li>
+              ))}
+            </ul>
             {reading ? (
               <p role="status" className="text-xs text-muted-foreground">
                 Reading your homework

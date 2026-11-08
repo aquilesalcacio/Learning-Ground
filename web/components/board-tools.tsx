@@ -23,14 +23,13 @@ import {
   getLgTool,
   type LgTool,
   redoLg,
-  setLgBackground,
   setLgPenColor,
   setLgTool,
   subscribeLgTool,
   undoLg,
 } from "@/lib/lg-actions";
 import { getActiveDocument, useLgState } from "@/lib/lg-store";
-import { BACKGROUND_OPTIONS, COLOR_HEX, type LgBackground, PEN_COLORS, type PenColor } from "@/lib/lg-types";
+import { COLOR_HEX, PEN_COLORS, type PenColor } from "@/lib/lg-types";
 
 const TOOLS: { tool: LgTool; label: string; icon: LucideIcon }[] = [
   { tool: "draw", label: "Pencil", icon: Pencil },
@@ -43,12 +42,12 @@ const TOOLS: { tool: LgTool; label: string; icon: LucideIcon }[] = [
 ];
 
 // The pencil button on the left of the chat bar. Everything the board needs lives
-// behind it, so the board itself stays free of chrome.
+// behind it, so the board itself stays free of chrome. There's no background choice:
+// the board is always see-through, over the app's dot grid.
 export function BoardTools() {
   const document = getActiveDocument(useLgState());
   const tool = useSyncExternalStore(subscribeLgTool, getLgTool, () => "draw" as LgTool);
   const [color, setColor] = useState<PenColor>("black");
-  const [background, setBackground] = useState<LgBackground>("plain");
 
   const active = TOOLS.find((item) => item.tool === tool) ?? TOOLS[0];
   const ActiveIcon = active.icon;
@@ -106,30 +105,9 @@ export function BoardTools() {
                     setColor(item);
                     setLgPenColor(item);
                   }}
-                  className="size-6 rounded-full border-2 border-background ring-offset-1 ring-offset-popover aria-pressed:ring-2 aria-pressed:ring-foreground"
+                  className="size-6 rounded-full border-2 border-white shadow-sm transition-transform duration-(--dur-base) ease-spring hover:scale-115 active:scale-90 aria-pressed:scale-110 aria-pressed:ring-2 aria-pressed:ring-foreground/70"
                   style={{ backgroundColor: COLOR_HEX[item] }}
                 />
-              ))}
-            </div>
-          </div>
-
-          <div className="grid gap-1.5">
-            <span className="text-xs text-muted-foreground">Background</span>
-            <div className="flex gap-1" role="group" aria-label="Board background">
-              {BACKGROUND_OPTIONS.map((option) => (
-                <Button
-                  key={option.value}
-                  type="button"
-                  variant={option.value === background ? "secondary" : "ghost"}
-                  size="sm"
-                  aria-pressed={option.value === background}
-                  onClick={() => {
-                    setBackground(option.value);
-                    setLgBackground(option.value);
-                  }}
-                >
-                  {option.label}
-                </Button>
               ))}
             </div>
           </div>

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { MockBadge } from "@/components/lg-fields";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { createTutor, setActiveTutor, useLgState } from "@/lib/lg-store";
+import { chooseTutor, createTutor, useLgState } from "@/lib/lg-store";
 import { COLOR_HEX, LANGUAGE_OPTIONS, optionLabel, STYLE_OPTIONS, TONE_OPTIONS } from "@/lib/lg-types";
 
 export function TutorsView() {
@@ -54,7 +54,11 @@ export function TutorsView() {
                 variant={tutor.id === state.active_tutor_id ? "secondary" : "ghost"}
                 size="sm"
                 aria-pressed={tutor.id === state.active_tutor_id}
-                onClick={() => setActiveTutor(tutor.id)}
+                onClick={() => {
+                  // Picking a tutor takes the student straight back to them on the board.
+                  chooseTutor(tutor.id);
+                  router.push("/");
+                }}
               >
                 {tutor.id === state.active_tutor_id ? "Selected" : "Select"}
               </Button>

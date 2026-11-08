@@ -3,7 +3,8 @@
 import { ChevronDown, Mic, MicOff, Send, Square } from "lucide-react";
 import { type FormEvent, useEffect, useEffectEvent, useRef, useState } from "react";
 import { BoardTools } from "@/components/board-tools";
-import { TutorSwitcher } from "@/components/tutor-switcher";
+import { pulseTutorOrb } from "@/components/tutor-orb";
+import { TutorStage } from "@/components/tutor-stage";
 import { UploadDialog } from "@/components/upload-dialog";
 import { Button } from "@/components/ui/button";
 import { onLgHomeworkRead } from "@/lib/lg-actions";
@@ -14,15 +15,14 @@ import {
   getConversationDocument,
   type LgState,
   readLgState,
-  setActiveTutor,
-  setConversationTutor,
   startConversation,
 } from "@/lib/lg-store";
 import { COLOR_HEX } from "@/lib/lg-types";
 import { homeworkContextualUpdate } from "@/lib/lg-tutor-prompt";
 import { homeworkContext, LgVoiceProvider, useLgVoice } from "@/lib/lg-voice";
 
-// The only chrome over the board: a tutor pill, the recent transcript, and one bar.
+// The only chrome over the board besides the orb: the recent transcript and one glass bar.
+// Everything the student asks goes through this bar or their voice.
 function Dock({ state, boardId }: { state: LgState; boardId: string }) {
   const tutor = getActiveTutor(state);
   const conversation = getActiveConversation(state);
@@ -86,17 +86,6 @@ function Dock({ state, boardId }: { state: LgState; boardId: string }) {
     setDraft("");
   }
 
-  function switchTutor(id: string) {
-    const next = state.tutors.find((item) => item.id === id);
-    if (!next || id === tutor.id) return;
-    setActiveTutor(id);
-    // A chat with messages stays intact in history, and the new tutor gets a new one.
-    // Before any message, homework and drawings just stay where they are with the new tutor.
-    if (conversation?.messages.length) sessionConversation.current = startConversation(id);
-    else if (conversation) setConversationTutor(conversation.id, id);
-    voice.switchTutor(next, voice.textOnly);
-  }
-
   function startVoice() {
     if (active) voice.restartSession(tutor, false);
     else beginSession(false);
@@ -112,8 +101,15 @@ function Dock({ state, boardId }: { state: LgState; boardId: string }) {
           ? "Speaking"
           : "Listening";
 
+  // Once the orb docks in the corner, narrow screens make room for it beside the bar.
+  const working = !!state.active_conversation_id;
+
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2 p-3">
+    <div
+      className={`pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col items-center gap-2 p-3 transition-[padding] duration-500 ease-soft ${
+        working ? "@max-4xl:pl-[5.25rem]" : ""
+      }`}
+    >
       {messages.length > 0 && (
         <div className="pointer-events-auto w-full max-w-2xl">
           {transcriptOpen ? (
@@ -121,7 +117,7 @@ function Dock({ state, boardId }: { state: LgState; boardId: string }) {
               ref={transcript}
               aria-label="Transcript"
               tabIndex={0}
-              className="max-h-[32dvh] space-y-2 overflow-y-auto rounded-xl bg-background/85 p-3 text-sm shadow-sm ring-1 ring-foreground/10 backdrop-blur"
+              className="glass max-h-[32dvh] space-y-2 overflow-y-auto rounded-3xl p-3 px-4 text-sm"
             >
               <div className="flex justify-end">
                 <Button
@@ -153,9 +149,9 @@ function Dock({ state, boardId }: { state: LgState; boardId: string }) {
             <div className="flex justify-center">
               <Button
                 type="button"
-                variant="outline"
+                variant="ghost"
                 size="sm"
-                className="pointer-events-auto rounded-full shadow-sm"
+                className="glass pointer-events-auto rounded-full"
                 onClick={() => setTranscriptOpen(true)}
               >
                 Show transcript ({messages.length})
@@ -166,21 +162,14 @@ function Dock({ state, boardId }: { state: LgState; boardId: string }) {
       )}
 
       {voice.error && (
-        <p
-          role="alert"
-          className="pointer-events-auto w-full max-w-2xl rounded-xl bg-background/95 px-3 py-2 text-sm text-destructive shadow-sm ring-1 ring-foreground/10 backdrop-blur"
-        >
+        <p role="alert" className="glass pointer-events-auto w-full max-w-2xl rounded-2xl px-4 py-2 text-sm text-destructive">
           {voice.error}
         </p>
       )}
 
-      <div className="pointer-events-auto">
-        <TutorSwitcher disabled={connecting} onSelect={switchTutor} />
-      </div>
-
       <form
         onSubmit={send}
-        className="pointer-events-auto flex w-full max-w-2xl items-center gap-1 rounded-full border bg-background/95 p-1.5 shadow-lg backdrop-blur"
+        className="glass pointer-events-auto flex w-full max-w-2xl items-center gap-1 rounded-full p-1.5"
       >
         {/* Keyed so the menu's color and background start fresh along with each chat's board. */}
         <BoardTools key={boardId} />
@@ -189,7 +178,11 @@ function Dock({ state, boardId }: { state: LgState; boardId: string }) {
           aria-label="Message your tutor"
           placeholder={`Ask ${tutor.name || "your tutor"}${conversation?.document ? " about this page" : " anything"}`}
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            // The orb notices the student typing.
+            pulseTutorOrb(0.12);
+          }}
           className="min-w-0 flex-1 bg-transparent px-2 text-sm outline-none placeholder:text-muted-foreground"
         />
         {active && (
@@ -258,6 +251,7 @@ export function ChatDock({ state, boardId }: { state: LgState; boardId: string }
 
   return (
     <LgVoiceProvider key={visit}>
+      <TutorStage state={state} />
       <Dock state={state} boardId={boardId} />
     </LgVoiceProvider>
   );
