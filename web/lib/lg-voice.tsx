@@ -13,7 +13,7 @@ import { applyLgAction, askLgQuestion, doneLookingAtLgWork, type LgAction, lookA
 import { LgApiAuthError, lgApiFetch } from "./lg-api";
 import { checkStudentWork, type WorkCheck, type WorkCheckOutcome, workReport } from "./lg-check-work";
 import { apiErrorMessage } from "./lg-document";
-import { parseNumber, parseNumberLineMarks } from "./lg-ink";
+import { parseNumber, parseNumberLineMarks, type ShapeKind } from "./lg-ink";
 import { runStudentProgress } from "./lg-progress-run";
 import { getActiveConversation, getActiveDocument, getBoardQuestions, readLgState } from "./lg-store";
 import { penInterrupted, setPenVoice } from "./lg-tutor-pen";
@@ -41,6 +41,12 @@ function act(name: string, parameters: Record<string, unknown>, action: LgAction
 }
 
 const text = (value: unknown) => String(value ?? "");
+// An optional parameter the tutor left out stays out.
+const optionalText = (value: unknown) => (value === undefined || value === null || value === "" ? undefined : text(value));
+const optionalNumber = (value: unknown) => {
+  const given = optionalText(value);
+  return given === undefined ? undefined : parseNumber(given);
+};
 
 // Check my work, with the tutor's pen hovering over the work while Gemini reads it, and
 // celebrating when it's right.
@@ -74,6 +80,27 @@ const clientTools: ClientTools = {
       min: parseNumber(text(p.min)),
       max: parseNumber(text(p.max)),
       marks: parseNumberLineMarks(p.marks ? text(p.marks) : ""),
+    }),
+  plot_graph: (p) =>
+    act("plot_graph", p, {
+      type: "plot_graph",
+      near_region_id: optionalText(p.near_region_id),
+      functions: text(p.functions),
+      x_min: parseNumber(text(p.x_min)),
+      x_max: parseNumber(text(p.x_max)),
+      y_min: optionalNumber(p.y_min),
+      y_max: optionalNumber(p.y_max),
+      points: optionalText(p.points),
+    }),
+  // An unknown shape draws nothing, and says so in the console.
+  draw_shape: (p) =>
+    act("draw_shape", p, {
+      type: "draw_shape",
+      near_region_id: optionalText(p.near_region_id),
+      shape: text(p.shape) as ShapeKind,
+      labels: optionalText(p.labels),
+      parts: optionalNumber(p.parts),
+      shaded: optionalNumber(p.shaded),
     }),
   clear: (p) => act("clear", p, { type: "clear" }),
   // Answers at once with the question's ID, which the tutor needs to check the answer later.

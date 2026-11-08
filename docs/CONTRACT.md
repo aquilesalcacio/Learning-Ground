@@ -70,7 +70,7 @@ Never commit these files. A tutor session starts from a one-time credential the 
 
 The tutor never drops a finished shape on the board. `applyLgAction` turns each action into steps for the tutor's pen (`web/lib/lg-tutor-pen.ts`), and the pen draws them by hand, one at a time, while the tutor talks. A cursor in the tutor's colours shows where the pen is (`web/components/tutor-cursor.tsx`, mounted as tldraw's `InFrontOfTheCanvas`).
 
-- **Geometry** is in `web/lib/lg-ink.ts`: hand-drawn loops, underlines, highlighter passes, arrow arcs, number lines and the answer box. It has no tldraw imports, so `node --test lib/lg-ink.test.ts` runs it.
+- **Geometry** is in `web/lib/lg-ink.ts`: hand-drawn loops, underlines, highlighter passes, arrow arcs, number lines, the answer box, graph axes and the shapes for `draw_shape`. Graphs are in `web/lib/lg-plot.ts`. Neither has tldraw imports, so `node --test lib/lg-ink.test.ts lib/lg-plot.test.ts` runs them.
 - **Timing:** in a voice call, a mark waits up to 700 ms for the tutor to start speaking, so ink and voice begin together. When the student interrupts, the rest of the queue plays three times faster. A text chat never waits.
 - **The student comes first:** while the student's pen is down (any tool but select and hand), the tutor's pen waits.
 - **Undo:** tutor marks are made outside tldraw's undo history, so the student's undo only ever removes their own work. Before this change, undo could remove a tutor mark.
@@ -88,14 +88,24 @@ The tutor never drops a finished shape on the board. `applyLgAction` turns each 
 | `write_text` | `near_region_id`, `text` | Handwriting in the margin, letter by letter |
 | `write_math` | `near_region_id`, `latex` | KaTeX in the tutor's colour, revealed left to right (`web/components/lg-math-shape.tsx`) |
 | `number_line` | `near_region_id`, `min`, `max`, `marks?` | The axis and ticks drawn left to right, then the numbers, then a dot for each mark |
+| `plot_graph` | `near_region_id?`, `functions`, `x_min`, `x_max`, `y_min?`, `y_max?`, `points?` | The x axis (520 ms) and y axis (440 ms) with their ticks, the numbers (90 ms each), each curve left to right in its own colour (about 900 ms a curve), then a dot and a label for each point |
+| `draw_shape` | `near_region_id?`, `shape`, `labels?`, `parts?`, `shaded?` | The outline by hand (500 to 1100 ms), then a fraction's dividers (140 ms each) and shaded parts (220 ms each), the right-angle marker, radius or dashed height, then the labels, letter by letter |
 | `clear` | none | The tutor's marks and questions fade out. The student's work stays |
 | `get_student_progress` | none | The pen thinks in the middle of the view while the tutor looks up the student's Canvas LMS info. It returns a report to the tutor and leaves no mark |
 
 Every ID above can also be the ID of a question the tutor wrote (below).
 
+### Graphs and shapes
+
+`plot_graph` and `draw_shape` draw a figure of about 280 × 220 board units, which fits the margin beside a problem. With `near_region_id`, it goes in that region's or question's margin, below what's already written there. Without one, or with an ID that isn't on the board, it goes on a free spot, chosen when its first step starts, as a question's is. Both use tldraw's own `draw` and `text` shapes, tagged `meta.author = "tutor"`, so `clear` removes them and no shape util has to stay registered.
+
+- **Functions** are read by a tokenizer and a precedence parser in `lg-plot.ts`, never with `eval` or `Function`. They take numbers, `x`, `+ - * / ^`, brackets, implicit multiplication (`2x`, `3(x+1)`, `x(x-1)`), `sin cos tan sqrt abs ln log exp`, `pi`, `e` (so `2e` is 2·e, and `1e3` is an error) and an optional `y=` or `f(x)=`. Anything else is logged, and nothing is drawn.
+- **Curves** are sampled 200 times and break where the function isn't defined or jumps, so `1/x` and `tan x` have no line through their asymptotes. With no `y_min` and `y_max`, the y range fits the curves and points, leaving out an asymptote's tails. Curves 2 and 3 use the tutor's other colours, never black, which is the student's pen. Ticks are numbered every 1, 2, 5 or 10 steps, as far apart as the widest number needs, each in a box as wide as its text, and an axis on the top or right edge has its numbers outside the plot.
+- **Shapes** label sides in order: a rectangle or square's bottom, then right; a right triangle's upright leg, bottom leg, then long side; a triangle's base, then the other sides, with `h=` drawing its height dashed. A circle takes `r=` or `d=`. A label for the whole shape (`A=`, `P=`, `area=` or `perimeter=`, with a capital A or P), and any past the last side, goes under it. Two numbers set a rectangle's or triangle's proportions. Fraction models have 1 to 12 `parts`, and the first `shaded` ones are filled.
+
 ### What to practice
 
-`get_student_progress` runs `runStudentProgress()` in `web/lib/lg-progress-run.ts`. The tutor calls it when the student asks what to work on, asks for practice, or asks for help without naming a problem while no homework is open. It then writes a practice problem with `ask_question` and sets it up on the board in the same reply.
+`get_student_progress` runs `runStudentProgress()` in `web/lib/lg-progress-run.ts`. The tutor calls it when the student asks what to work on, asks for practice, or asks for help without naming a problem while no homework is open. When they name a topic, such as slope, it skips the lookup and takes that topic. Then it writes a practice problem with `ask_question` and sets it up on the board in the same reply.
 
 1. The pen thinks in the middle of the view until the report is ready (`lookAtLgBoard` in `lg-actions.ts`).
 2. Fresh Canvas LMS data gets about 4 seconds: the calendar feed is refreshed (`GET /canvas-lms/calendar-feed`, a 409 when none is saved), then the OAuth import is tried (`GET /canvas-lms/profile`, through `fetchCanvasLmsProfile`, which only adds courses and refreshes Coming up, and leaves name and school alone). Both fail quietly, and then the saved profile is used.

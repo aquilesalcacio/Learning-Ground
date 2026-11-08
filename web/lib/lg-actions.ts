@@ -21,6 +21,8 @@ import { linkLgBoard, noteLgActionTarget } from "./lg-board-link";
 import {
   arcAt,
   arrowEnds,
+  axisStroke,
+  densify,
   dotPoints,
   easeOutCubic,
   easeStroke,
@@ -36,9 +38,13 @@ import {
   partialPath,
   pathLength,
   roundedRectPoints,
+  type ShapeKind,
+  shapeLayout,
+  type ShapeStroke,
   typedText,
   underlinePoints,
 } from "./lg-ink";
+import { type GraphSpec, graphLayout, tickLabelWidth, Y_LABEL_OFFSET } from "./lg-plot";
 import {
   attachPen,
   enqueuePen,
@@ -88,7 +94,16 @@ import {
   updateBoardQuestion,
 } from "./lg-store";
 import { resolveLanguage } from "./lg-tutor-prompt";
-import type { LgBackground, LgDocument, LgDocumentPage, LgLanguage, LgRegion, PenColor } from "./lg-types";
+import {
+  type LgBackground,
+  type LgDocument,
+  type LgDocumentPage,
+  type LgLanguage,
+  type LgRegion,
+  type PenColor,
+  TUTOR_COLORS,
+  type TutorColor,
+} from "./lg-types";
 
 // The seam between the board and the voice session (vision doc, section 8.1).
 // Voice client tools and the test buttons both call applyLgAction and nothing else.
@@ -96,7 +111,8 @@ import type { LgBackground, LgDocument, LgDocumentPage, LgLanguage, LgRegion, Pe
 // the tutor talks: it travels to the problem, then inks the mark stroke by stroke. Tutor marks
 // stay out of the undo history, so the student's undo only ever takes their own work.
 // Actions aim at a homework region (p1.q3) or at a question the tutor wrote on the board (q1),
-// so the tutor can teach on a blank board too.
+// so the tutor can teach on a blank board too. Graphs and shapes stand on their own, so they can
+// also go on a free spot of the board.
 export type LgAction =
   | { type: "focus_region"; region_id: string }
   | { type: "point_at"; region_id: string }
@@ -107,6 +123,17 @@ export type LgAction =
   | { type: "write_text"; near_region_id: string; text: string }
   | { type: "write_math"; near_region_id: string; latex: string }
   | { type: "number_line"; near_region_id: string; min: number; max: number; marks?: NumberLineMark[] }
+  | {
+      type: "plot_graph";
+      near_region_id?: string;
+      functions: string;
+      x_min: number;
+      x_max: number;
+      y_min?: number;
+      y_max?: number;
+      points?: string;
+    }
+  | { type: "draw_shape"; near_region_id?: string; shape: ShapeKind; labels?: string; parts?: number; shaded?: number }
   | { type: "clear" };
 
 const MARGIN_LINE_GAP = 12;
@@ -136,6 +163,13 @@ function tutorMeta(near?: string, question?: string) {
 
 function tutorColor() {
   return getActiveTutor(readLgState()).color;
+}
+
+// The tutor's colour first, then its other colours for a second and third curve. Never black,
+// which is the student's pen.
+function curveColors(): TutorColor[] {
+  const own = tutorColor();
+  return [own, ...TUTOR_COLORS.filter((color) => color !== own)];
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -250,9 +284,12 @@ type InkOptions = {
   near?: string;
   question?: string;
   size?: "s" | "m" | "l";
-  fill?: boolean;
+  // A closed stroke, filled: "fill" in full colour for a dot, "solid" in a light tint for a shaded part.
+  fill?: "fill" | "solid";
   dash?: "draw" | "dashed";
   hold?: boolean;
+  // The tutor's colour unless given, such as for a graph's second curve.
+  color?: TutorColor;
 };
 
 // One stroke, drawn along its points from the first to the last. The points are read when the
@@ -286,17 +323,21 @@ function inkStep(editor: Editor, kind: "draw" | "highlight", source: () => InkPo
           ...base,
           type: "draw",
           props: {
-            color: tutorColor(),
+            color: options.color ?? tutorColor(),
             size,
             dash: options.dash ?? "draw",
-            fill: options.fill ? "fill" : "none",
+            fill: options.fill ?? "none",
             isClosed: !!options.fill,
             segments,
             isComplete: false,
           },
         });
       } else {
-        editor.createShape({ ...base, type: "highlight", props: { color: tutorColor(), size, segments, isComplete: false } });
+        editor.createShape({
+          ...base,
+          type: "highlight",
+          props: { color: options.color ?? tutorColor(), size, segments, isComplete: false },
+        });
       }
     },
     frame: (t) => {
@@ -331,7 +372,7 @@ function textStep(
   editor: Editor,
   place: () => TextPlace,
   text: string,
-  options: { near?: string; question?: string; font?: "draw" | "mono"; duration?: number; hold?: boolean },
+  options: { near?: string; question?: string; font?: "draw" | "mono"; duration?: number; hold?: boolean; color?: TutorColor },
 ): PenStep {
   const id = createShapeId();
   let spot: TextPlace = { x: 0, y: 0, w: MARGIN_WIDTH, align: "start" };
@@ -362,7 +403,7 @@ function textStep(
         meta: tutorMeta(options.near, options.question),
         props: {
           richText: toRichText(""),
-          color: tutorColor(),
+          color: options.color ?? tutorColor(),
           size: "s",
           font: options.font ?? "draw",
           autoSize: false,
@@ -525,7 +566,7 @@ function numberLineSteps(editor: Editor, target: LgTarget, min: number, max: num
           const at = center();
           return at ? dotPoints(at, 5) : [];
         },
-        { duration: 160, near, size: "s", fill: true, hold: false },
+        { duration: 160, near, size: "s", fill: "fill", hold: false },
       ),
       textStep(
         editor,
@@ -545,6 +586,167 @@ function numberLineSteps(editor: Editor, target: LgTarget, min: number, max: num
       return placed ? { x: placed.axis[1].x + 14 / zoom, y: placed.axis[1].y + 22 / zoom } : null;
     }),
   );
+  return steps;
+}
+
+// Graphs and shapes: laid out once from (0, 0) by lg-plot.ts and lg-ink.ts, and moved into place
+// when their first step starts. Beside a target they go in its margin, below what's already
+// written there; with no target, on a free spot of the board.
+function figurePlace(editor: Editor, target: LgTarget | null, size: { w: number; h: number }) {
+  let origin: InkPoint | null = null;
+  const place = () =>
+    (origin ??= target ? { x: target.marginX, y: nextNoteY(editor, target) } : freeSpot(editor, size.w, size.h));
+  return {
+    at: (point: InkPoint): InkPoint => {
+      const by = place();
+      return { x: by.x + point.x, y: by.y + point.y };
+    },
+    box: (): LgBounds => {
+      const by = place();
+      return { x: by.x, y: by.y, w: size.w, h: size.h };
+    },
+  };
+}
+
+// Shows the figure before it's drawn, with its target when it has one.
+function revealFigure(editor: Editor, target: LgTarget | null, box: () => LgBounds): PenStep {
+  return revealStep(editor, box, () => {
+    const shown = Box.From(box()).expandBy(24);
+    return target ? Box.Common([Box.From(target.focus), shown]) : shown;
+  });
+}
+
+const restBelow = (editor: Editor, box: () => LgBounds) =>
+  penRestStep(() => {
+    const placed = box();
+    const zoom = editor.getZoomLevel();
+    return { x: placed.x + placed.w + 14 / zoom, y: placed.y + placed.h - 10 / zoom };
+  });
+
+const CURVE_MS = 900;
+
+// A graph: the axes with their ticks, the numbers, each curve left to right in its own colour,
+// one stroke per unbroken piece, then a dot and a label for each point. A function that can't be
+// read draws nothing: the reason is logged and no steps come back.
+function graphSteps(editor: Editor, target: LgTarget | null, spec: GraphSpec): PenStep[] {
+  const graph = graphLayout(spec);
+  if (!graph.ok) {
+    console.warn(`[lg] plot_graph can't draw this: ${graph.error}.`, spec);
+    return [];
+  }
+  if (graph.note) console.warn(`[lg] plot_graph: ${graph.note}.`, spec);
+  const { layout } = graph;
+  const { at, box } = figurePlace(editor, target, layout.box);
+  const near = target?.id;
+  const axis = (ends: [InkPoint, InkPoint], ticks: { at: InkPoint }[]) => () =>
+    axisStroke(at(ends[0]), at(ends[1]), ticks.map((tick) => at(tick.at)));
+  const steps: PenStep[] = [
+    revealFigure(editor, target, box),
+    inkStep(editor, "draw", axis(layout.xAxis, layout.xTicks), { duration: 520, near, size: "s" }),
+    inkStep(editor, "draw", axis(layout.yAxis, layout.yTicks), { duration: 440, near, size: "s", hold: false }),
+  ];
+  const label = (text: string, place: () => TextPlace) => textStep(editor, place, text, { near, duration: 90, hold: false });
+  // Each number in a box as wide as its text, so it stays on one line, on its axis's label side.
+  for (const tick of layout.xTicks.filter((item) => item.label)) {
+    const w = tickLabelWidth(tick.label);
+    steps.push(
+      label(tick.label, () => {
+        const spot = at(tick.at);
+        const y = layout.xLabelSide === "below" ? spot.y + 7 : spot.y - 7 - NOTE_LINE_HEIGHT;
+        return { x: spot.x - w / 2, y, w, align: "middle" };
+      }),
+    );
+  }
+  for (const tick of layout.yTicks.filter((item) => item.label)) {
+    const w = tickLabelWidth(tick.label);
+    steps.push(
+      label(tick.label, () => {
+        const spot = at(tick.at);
+        const x = layout.yLabelSide === "left" ? spot.x - Y_LABEL_OFFSET - w : spot.x + Y_LABEL_OFFSET;
+        return { x, y: spot.y - NOTE_LINE_HEIGHT / 2, w, align: "middle" };
+      }),
+    );
+  }
+  const colors = curveColors();
+  layout.curves.forEach((pieces, index) => {
+    const total = pieces.reduce((sum, piece) => sum + pathLength(piece), 0) || 1;
+    for (const piece of pieces) {
+      steps.push(
+        inkStep(editor, "draw", () => densify(piece.map(at)), {
+          duration: Math.max(60, (CURVE_MS * pathLength(piece)) / total),
+          near,
+          color: colors[index % colors.length],
+          hold: false,
+        }),
+      );
+    }
+  });
+  for (const point of layout.points) {
+    steps.push(
+      inkStep(editor, "draw", () => dotPoints(at(point.at), 4), { duration: 140, near, size: "s", fill: "fill", hold: false }),
+      textStep(
+        editor,
+        () => {
+          const spot = at(point.at);
+          const w = Array.from(point.label).length * NOTE_CHAR_WIDTH + 12;
+          return { x: spot.x + 6, y: spot.y - NOTE_LINE_HEIGHT - 2, w, align: "start" };
+        },
+        point.label,
+        { near, duration: typingMs(point.label, 120, 450), hold: false },
+      ),
+    );
+  }
+  steps.push(restBelow(editor, box));
+  return steps;
+}
+
+// How each part of a shape is drawn.
+const SHAPE_INK: Record<ShapeStroke["kind"], Omit<InkOptions, "duration" | "near"> & { duration?: number }> = {
+  outline: { size: "m" },
+  divider: { duration: 140, size: "s", hold: false },
+  shade: { duration: 220, size: "s", fill: "solid", hold: false },
+  marker: { duration: 220, size: "s", hold: false },
+  dot: { duration: 100, size: "s", fill: "fill", hold: false },
+  guide: { duration: 320, size: "s", dash: "dashed", hold: false },
+};
+
+// A shape: its outline by hand, then a fraction's dividers and shaded parts, the right-angle
+// marker, radius or height, and its labels, letter by letter. A shape it doesn't know draws
+// nothing: the reason is logged and no steps come back.
+function shapeSteps(editor: Editor, target: LgTarget | null, action: Extract<LgAction, { type: "draw_shape" }>): PenStep[] {
+  const layout = shapeLayout(action.shape, action, seedFor(target?.id ?? "board"));
+  if (!layout) {
+    console.warn(`[lg] draw_shape doesn't know the shape "${action.shape}".`, action);
+    return [];
+  }
+  const { at, box } = figurePlace(editor, target, layout.box);
+  const near = target?.id;
+  const steps: PenStep[] = [revealFigure(editor, target, box)];
+  for (const stroke of layout.strokes) {
+    const { duration, ...ink } = SHAPE_INK[stroke.kind];
+    steps.push(
+      inkStep(editor, "draw", () => stroke.points.map(at), {
+        ...ink,
+        near,
+        duration: duration ?? clamp(pathLength(stroke.points) * 1.4, 500, 1100),
+      }),
+    );
+  }
+  for (const label of layout.labels) {
+    const w = Array.from(label.text).length * NOTE_CHAR_WIDTH + 16;
+    steps.push(
+      textStep(
+        editor,
+        () => {
+          const spot = at(label.at);
+          return { x: spot.x - w / 2, y: spot.y - NOTE_LINE_HEIGHT / 2, w, align: "middle" };
+        },
+        label.text,
+        { near, duration: typingMs(label.text, 120, 500), hold: false },
+      ),
+    );
+  }
+  steps.push(restBelow(editor, box));
   return steps;
 }
 
@@ -611,8 +813,19 @@ function targetSteps(editor: Editor, target: LgTarget, action: LgAction): PenSte
   }
 }
 
+// The steps for an action, or null when it aims at nothing on the board. A figure that can't be
+// drawn logs why and comes back with no steps.
 function planLgAction(editor: Editor, document: LgDocument | null, action: LgAction): PenStep[] | null {
   if (action.type === "clear") return clearSteps(editor);
+  if (action.type === "plot_graph" || action.type === "draw_shape") {
+    // A figure means something on its own, so one aimed at an ID that isn't on the board goes on
+    // a free spot instead of being dropped.
+    const target = action.near_region_id ? resolveTarget(document, action.near_region_id) : null;
+    if (action.near_region_id && !target) {
+      console.warn("[lg] No region or written question has this ID, so it goes on a free spot:", action);
+    }
+    return action.type === "plot_graph" ? graphSteps(editor, target, action) : shapeSteps(editor, target, action);
+  }
   if (action.type === "draw_arrow") {
     const from = resolveTarget(document, action.from_region_id);
     const to = resolveTarget(document, action.to_region_id);
@@ -636,6 +849,8 @@ export function applyLgAction(action: LgAction) {
     console.warn("[lg] This action names no region or written question on the board, or can't be drawn:", action);
     return;
   }
+  // A figure that can't be drawn has already said why.
+  if (!steps.length) return;
   enqueuePen(steps);
 }
 

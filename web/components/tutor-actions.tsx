@@ -5,8 +5,9 @@ import { FieldSelect } from "@/components/lg-fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { applyLgAction, askLgQuestion, type LgAction } from "@/lib/lg-actions";
-import { parseNumber, parseNumberLineMarks } from "@/lib/lg-ink";
+import { parseNumber, parseNumberLineMarks, SHAPE_KINDS, type ShapeKind } from "@/lib/lg-ink";
 import { runStudentProgress } from "@/lib/lg-progress-run";
 import { getActiveDocument, getBoardQuestions, useLgState } from "@/lib/lg-store";
 
@@ -45,6 +46,113 @@ function AskForm({ regionId, regionLabel }: { regionId: string; regionLabel: str
         {outcome && <span className="text-xs text-muted-foreground">{outcome}</span>}
       </div>
     </form>
+  );
+}
+
+const SHAPE_NAMES: Record<ShapeKind, string> = {
+  rectangle: "Rectangle",
+  square: "Square",
+  triangle: "Triangle",
+  right_triangle: "Right triangle",
+  circle: "Circle",
+  fraction_bar: "Fraction bar",
+  fraction_circle: "Fraction circle",
+};
+
+// Used when the labels box is left empty, so each shape shows what its labels do.
+const SAMPLE_LABELS: Record<ShapeKind, string> = {
+  rectangle: "8 cm, 3 cm",
+  square: "s=4",
+  triangle: "b=6, h=4",
+  right_triangle: "a=3, b=4, c=?",
+  circle: "r=5",
+  fraction_bar: "",
+  fraction_circle: "",
+};
+
+// plot_graph and draw_shape, beside the chosen region or question, or on a free spot when
+// there's none or the switch says so.
+function FigureForms({ near }: { near: string }) {
+  const [functions, setFunctions] = useState("2x+1; x^2-3");
+  const [xRange, setXRange] = useState("-5, 5");
+  const [yRange, setYRange] = useState("");
+  const [points, setPoints] = useState("0,1:intercept");
+  const [labels, setLabels] = useState("");
+  const [fraction, setFraction] = useState("4, 3");
+  const [freeSpot, setFreeSpot] = useState(false);
+  const near_region_id = near && !freeSpot ? near : undefined;
+
+  function plot(event: FormEvent) {
+    event.preventDefault();
+    const [x_min, x_max] = xRange.split(",").map((part) => parseNumber(part));
+    const [y_min, y_max] = yRange.trim() ? yRange.split(",").map((part) => parseNumber(part)) : [];
+    const marked = points.trim() || undefined;
+    applyLgAction({ type: "plot_graph", near_region_id, functions, x_min, x_max, y_min, y_max, points: marked });
+  }
+
+  function draw(shape: ShapeKind) {
+    const [parts, shaded] = fraction.split(",").map((part) => parseNumber(part));
+    applyLgAction({ type: "draw_shape", near_region_id, shape, labels: labels.trim() || SAMPLE_LABELS[shape], parts, shaded });
+  }
+
+  return (
+    <>
+      {near && (
+        <div className="flex items-center gap-2">
+          <Switch id="action-figure-free" size="sm" checked={freeSpot} onCheckedChange={setFreeSpot} />
+          <Label htmlFor="action-figure-free" className="text-xs">
+            Graphs and shapes on a free spot
+          </Label>
+        </div>
+      )}
+      <form className="grid gap-1.5" onSubmit={plot}>
+        <Label htmlFor="action-functions" className="text-xs">
+          Graph: functions, x range, optional y range and points
+        </Label>
+        <Input id="action-functions" value={functions} onChange={(event) => setFunctions(event.target.value)} />
+        <div className="flex gap-1">
+          <Input aria-label="x range" className="w-20" value={xRange} onChange={(event) => setXRange(event.target.value)} />
+          <Input
+            aria-label="y range"
+            className="w-20"
+            placeholder="auto"
+            value={yRange}
+            onChange={(event) => setYRange(event.target.value)}
+          />
+          <Input aria-label="Points" placeholder="2,5:vertex" value={points} onChange={(event) => setPoints(event.target.value)} />
+          <Button type="submit" variant="outline" size="sm">
+            Plot
+          </Button>
+        </div>
+      </form>
+
+      <div className="grid gap-1.5">
+        <Label htmlFor="action-labels" className="text-xs">
+          Shape: labels, and parts, shaded for fractions
+        </Label>
+        <div className="flex gap-1">
+          <Input
+            id="action-labels"
+            placeholder="Each shape's sample"
+            value={labels}
+            onChange={(event) => setLabels(event.target.value)}
+          />
+          <Input
+            aria-label="Parts, shaded"
+            className="w-20"
+            value={fraction}
+            onChange={(event) => setFraction(event.target.value)}
+          />
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {SHAPE_KINDS.map((shape) => (
+            <Button key={shape} type="button" variant="outline" size="sm" onClick={() => draw(shape)}>
+              {SHAPE_NAMES[shape]}
+            </Button>
+          ))}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -127,6 +235,7 @@ export function TutorActions() {
           </p>
           <AskForm regionId="" regionLabel="" />
           <ProgressButton />
+          <FigureForms near="" />
         </div>
       ) : (
         <div className="grid gap-3 pt-1">
@@ -220,6 +329,8 @@ export function TutorActions() {
               </Button>
             </div>
           </form>
+
+          <FigureForms near={regionId} />
         </div>
       )}
     </details>

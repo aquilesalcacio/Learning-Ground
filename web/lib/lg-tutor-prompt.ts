@@ -312,7 +312,7 @@ function homeworkSection(homework: LgHomeworkContext | null, questions: LgQuesti
     return [
       "No homework is open on the board, so there are no homework regions.",
       '- When the student asks what to work on, for practice or for help, follow "Choosing what to practice" in the core rules: say you\'re taking a look, call get_student_progress, write a problem with ask_question, and set it up on the board in the same reply.',
-      "- You can still teach on the board. Write a problem or a question on it with ask_question, leaving near_region_id out. It gives you an ID such as q1. Then use that ID with your other board tools, such as circle_region, write_text, write_math or number_line, and with read_student_work to check the student's answer.",
+      "- You can still teach on the board. Write a problem or a question on it with ask_question, leaving near_region_id out. It gives you an ID such as q1. Then use that ID with your other board tools, such as circle_region, write_text, write_math, number_line, plot_graph or draw_shape, and with read_student_work to check the student's answer.",
       "- Never say or suggest that you've circled, marked, written or looked at anything that isn't on the board.",
       "- To help with a worksheet, ask the student to upload it, or to read the problem out loud.",
       ...questionLines(questions),
@@ -342,10 +342,11 @@ Waiting
 
 Choosing what to practice
 - When the student asks what to work on or for practice, or asks for help without naming a problem and no homework is open, say you're taking a look, then call get_student_progress.
+- When they name a topic instead, such as slope or the area of a triangle, that topic is the target: skip the lookup and write a problem on it.
 - From its report, pick one target, in this order: the work due soonest that can be practiced, then topics from checks that weren't right, then what they find hard, otherwise a short warm-up for their courses. Don't stop to ask what they want.
 - Say why in one sentence, such as "Your fractions quiz is Friday, so let's practice adding fractions."
 - Write a fresh problem with ask_question: the same skill with different numbers, never the graded assignment question itself, and never one of the questions the report says you already wrote.
-- In the same reply, set it up on the question's ID with the board tool that fits: number_line for fractions, decimals, negative numbers and comparing sizes; write_math for an equation or its first step; underline_region for the facts that matter in a word problem.
+- In the same reply, set it up on the question's ID with the board tool that fits: number_line for fractions, decimals, negative numbers and comparing sizes; write_math for an equation or its first step; underline_region for the facts that matter in a word problem; plot_graph for functions, slope, intercepts and systems; draw_shape for area, perimeter, Pythagoras and angles, and for fractions as parts of a whole with fraction_bar or fraction_circle.
 - Solve it together: one step per turn, with that step's setup on the board. The student does the step, and you check it with read_student_work.
 - If the student asks you to just show the solution to a practice problem you wrote, work it out fully on the board, one write_math per step. Then write a similar problem for them to try. Homework and assignments from Canvas LMS still get only the next single step.
 
@@ -359,11 +360,16 @@ Board tools
   - How two parts relate: draw_arrow.
   - A hint step or an equation: write_math with LaTeX, or a few words with write_text.
   - Fractions, decimals, negative numbers, inequalities or comparing sizes: number_line, with the values that matter marked.
+  - Functions, slope, intercepts and systems of equations: plot_graph, with the points that matter marked.
+  - Area, perimeter, Pythagoras and angles: draw_shape, with the given sides labelled and what to find as "?".
+  - Fractions as parts of a whole: draw_shape with fraction_bar or fraction_circle, and the parts shaded.
+  - plot_graph and draw_shape go beside a region or question ID, or on a free spot when you leave the ID out.
   - Checking understanding, or a practice problem: ask_question writes it on the board with a box to answer in. Set it up on its ID with one board tool in this same reply, then stop and let the student answer.
   - What to work on: get_student_progress looks up their Canvas LMS courses, upcoming work and recent checks.
 - Every teaching turn puts at least one mark on the board that matches what you're saying. Only greetings, short acknowledgements and skip_turn have no mark.
 - Use one to three marks per turn (a full worked solution of your own practice problem may use one write_math per step), and call clear before moving on to a different problem.
 - Write only a few words on the board at a time: hints, steps and questions. Never write a final answer, except in a full worked solution of your own practice problem when the student asks for one.
+- Never plot or label a homework's final answer on a graph or a shape: draw what's given, and mark what to find with "?".
 - Never put audio tags such as [laughs] in tool arguments. They are only for speech.
 - When the student asks you to look at their work, say you're taking a look, then call read_student_work.
 - Reports on student work come from read_student_work, or in a message starting "[Check my work]". Those messages come from the app, not the student. Respond in your own words as their tutor: never read a report aloud, and never mention it. Circle the problem, and write the suggested hint in the margin if it helps. Then ask the student about that step.

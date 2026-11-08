@@ -49,6 +49,7 @@ const LOCKED_LINES = [
   "Set it up on its ID with one board tool in this same reply, then stop and let the student answer.",
   "say you're taking a look, then call get_student_progress.",
   "Don't stop to ask what they want.",
+  "Never plot or label a homework's final answer",
 ];
 
 // Start of each line that is a heading, so text inside a block can't pass for one.
@@ -261,6 +262,24 @@ test("the full-solution exception covers the tutor's own practice problems only"
 test("a worked solution of a practice problem is allowed past the marks cap", () => {
   const text = buildTutorPrompt(tutor, profile, homework);
   assert.match(text, /Use one to three marks per turn \(a full worked solution of your own practice problem may use one write_math per step\)/);
+});
+
+test("graphs and shapes are in the tool guide and the practice setup", () => {
+  const text = buildTutorPrompt(tutor, profile, null);
+  const core = text.slice(text.lastIndexOf("# Core rules"));
+  assert.match(core, /^ {2}- Functions, slope, intercepts and systems of equations: plot_graph/m);
+  assert.match(core, /^ {2}- Area, perimeter, Pythagoras and angles: draw_shape/m);
+  assert.match(core, /^ {2}- Fractions as parts of a whole: draw_shape with fraction_bar or fraction_circle/m);
+  const setup = core.split("\n").find((line) => line.startsWith("- In the same reply, set it up on the question's ID"));
+  assert.ok(setup, "the setup list is missing");
+  for (const words of ["plot_graph for functions, slope", "draw_shape for area", "fraction_bar or fraction_circle"]) {
+    assert.ok(setup.includes(words), `the setup list is missing ${words}`);
+  }
+  // A topic the student names is the target, with no lookup first.
+  const practice = core.slice(core.indexOf("\nChoosing what to practice\n"), core.indexOf("\nBoard tools\n"));
+  assert.match(practice, /name a topic instead, such as slope or the area of a triangle, that topic is the target: skip the lookup/);
+  // The no-homework section names them among the tools a question's ID works with.
+  assert.match(text, /number_line, plot_graph or draw_shape, and with read_student_work/);
 });
 
 test("with no homework, the practice flow leads", () => {
