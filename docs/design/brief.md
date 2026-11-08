@@ -46,8 +46,11 @@ The logo is the name with a lightbulb over the "i", above a grid in perspective.
 | `learning-grounds-logo.png` | With the grid: large spaces, such as a login or welcome screen |
 | `learning-grounds-wordmark-light.png` | White version for dark backgrounds |
 | `learning-grounds-logo-original.png` | The file as supplied, on its grey background |
+| `learning-grounds-icon.png` | The bulb alone, square: the source for the app icons |
 
 All but the original have a transparent background and dark ink (`#111`), so they sit on the dot grid, the white sidebar or glass.
+
+**App icons.** `web/app/favicon.ico` and `web/app/icon.png` show the bulb on a white rounded tile, so it stays visible on dark browser tabs. `web/app/apple-icon.png` is the iPhone home-screen icon. Google Search can't read the home page while it redirects to login, so `/favicon.ico` is the icon it can reach. Keep that path public in `web/proxy.ts`.
 
 ## Tutors and colour
 - The code has five tutor colours: `blue`, `red`, `green`, `orange` and `violet` (`TUTOR_COLORS` in `web/lib/lg-types.ts`). Their single hex values live in `COLOR_HEX` there.
