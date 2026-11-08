@@ -13,28 +13,12 @@ import { applyLgAction, askLgQuestion, doneLookingAtLgWork, type LgAction, lookA
 import { LgApiAuthError, lgApiFetch } from "./lg-api";
 import { checkStudentWork, type WorkCheck, type WorkCheckOutcome, workReport } from "./lg-check-work";
 import { apiErrorMessage } from "./lg-document";
-import { type MarkVerdict, markVerdictFor, parseNumber, parseNumberLineMarks, type ShapeKind } from "./lg-ink";
-import { runStudentProgress } from "./lg-progress-run";
-import { findRegion } from "./lg-regions";
-import {
-  findBoardQuestion,
-  getActiveConversation,
-  getActiveDocument,
-  getBoardQuestions,
-  getBoardSelections,
-  type LgState,
-  readLgState,
-} from "./lg-store";
+import { parseNumber, parseNumberLineMarks } from "./lg-ink";
+import { getActiveConversation, getActiveDocument, getBoardQuestions, readLgState } from "./lg-store";
 import { penInterrupted, setPenVoice } from "./lg-tutor-pen";
-import {
-  buildTutorPrompt,
-  type LgHomeworkContext,
-  type LgSelectionContext,
-  resolveLanguage,
-  toneVoiceSettings,
-} from "./lg-tutor-prompt";
+import { buildTutorPrompt, type LgHomeworkContext, resolveLanguage, toneVoiceSettings } from "./lg-tutor-prompt";
 import { findVoice } from "./lg-voices";
-import type { ChatSpeaker, LgBoardSelection, LgDocument, Tutor } from "./lg-types";
+import type { ChatSpeaker, LgDocument, Tutor } from "./lg-types";
 
 const SILENT_TURN = /^[\s.…]*$/;
 
@@ -56,12 +40,6 @@ function act(name: string, parameters: Record<string, unknown>, action: LgAction
 }
 
 const text = (value: unknown) => String(value ?? "");
-// An optional parameter the tutor left out stays out.
-const optionalText = (value: unknown) => (value === undefined || value === null || value === "" ? undefined : text(value));
-const optionalNumber = (value: unknown) => {
-  const given = optionalText(value);
-  return given === undefined ? undefined : parseNumber(given);
-};
 
 // Check my work, with the tutor's pen hovering over the work while Gemini reads it, and
 // celebrating when it's right.
@@ -77,11 +55,8 @@ const clientTools: ClientTools = {
   focus_region: (p) => act("focus_region", p, { type: "focus_region", region_id: text(p.region_id) }),
   point_at: (p) => act("point_at", p, { type: "point_at", region_id: text(p.region_id) }),
   circle_region: (p) => act("circle_region", p, { type: "circle_region", region_id: text(p.region_id) }),
-  // With text, just that phrase of the problem; without it, or when the phrase isn't found, all of it.
-  underline_region: (p) =>
-    act("underline_region", p, { type: "underline_region", region_id: text(p.region_id), text: optionalText(p.text) }),
-  highlight_region: (p) =>
-    act("highlight_region", p, { type: "highlight_region", region_id: text(p.region_id), text: optionalText(p.text) }),
+  underline_region: (p) => act("underline_region", p, { type: "underline_region", region_id: text(p.region_id) }),
+  highlight_region: (p) => act("highlight_region", p, { type: "highlight_region", region_id: text(p.region_id) }),
   draw_arrow: (p) =>
     act("draw_arrow", p, {
       type: "draw_arrow",
@@ -89,18 +64,6 @@ const clientTools: ClientTools = {
       to_region_id: text(p.to_region_id),
       label: p.label ? text(p.label) : undefined,
     }),
-  draw_line: (p) =>
-    act("draw_line", p, {
-      type: "draw_line",
-      from_region_id: text(p.from_region_id),
-      to_region_id: text(p.to_region_id),
-      label: optionalText(p.label),
-      // A boolean, though a model may send it as text.
-      dashed: p.dashed === true || p.dashed === "true",
-    }),
-  // An unknown verdict draws nothing, and says so in the console.
-  mark_work: (p) =>
-    act("mark_work", p, { type: "mark_work", region_id: text(p.region_id), verdict: text(p.verdict) as MarkVerdict }),
   write_text: (p) => act("write_text", p, { type: "write_text", near_region_id: text(p.near_region_id), text: text(p.text) }),
   write_math: (p) => act("write_math", p, { type: "write_math", near_region_id: text(p.near_region_id), latex: text(p.latex) }),
   number_line: (p) =>
@@ -111,27 +74,6 @@ const clientTools: ClientTools = {
       max: parseNumber(text(p.max)),
       marks: parseNumberLineMarks(p.marks ? text(p.marks) : ""),
     }),
-  plot_graph: (p) =>
-    act("plot_graph", p, {
-      type: "plot_graph",
-      near_region_id: optionalText(p.near_region_id),
-      functions: text(p.functions),
-      x_min: parseNumber(text(p.x_min)),
-      x_max: parseNumber(text(p.x_max)),
-      y_min: optionalNumber(p.y_min),
-      y_max: optionalNumber(p.y_max),
-      points: optionalText(p.points),
-    }),
-  // An unknown shape draws nothing, and says so in the console.
-  draw_shape: (p) =>
-    act("draw_shape", p, {
-      type: "draw_shape",
-      near_region_id: optionalText(p.near_region_id),
-      shape: text(p.shape) as ShapeKind,
-      labels: optionalText(p.labels),
-      parts: optionalNumber(p.parts),
-      shaded: optionalNumber(p.shaded),
-    }),
   clear: (p) => act("clear", p, { type: "clear" }),
   // Answers at once with the question's ID, which the tutor needs to check the answer later.
   ask_question: (p) => {
@@ -140,7 +82,7 @@ const clientTools: ClientTools = {
     if (!outcome.ok) return outcome.message;
     return [
       `Question ${outcome.id} is being written on the board, with an answer box under it.`,
-      `Set it up on ${outcome.id} with one board tool in this same reply, then stop and let the student answer. Don't give the answer.`,
+      "Stop and wait for the student to answer. Don't give the answer.",
       `To check their answer, call read_student_work with region_id ${outcome.id}. You can also mark it with your other tools using ${outcome.id}.`,
     ].join(" ");
   },
@@ -150,13 +92,6 @@ const clientTools: ClientTools = {
     const outcome = await checkWithPen(text(p.region_id));
     console.log(`[lg-voice] ${new Date().toISOString()} read_student_work done`, outcome.ok);
     return outcome.ok ? workReport(outcome) : outcome.message;
-  },
-  // Blocking too: Canvas LMS gets about 4 s, then the saved profile is used.
-  get_student_progress: async () => {
-    console.log(`[lg-voice] ${new Date().toISOString()} tool get_student_progress`);
-    const report = await runStudentProgress();
-    console.log(`[lg-voice] ${new Date().toISOString()} get_student_progress done`);
-    return report;
   },
 };
 
@@ -176,19 +111,6 @@ export function homeworkContext(document: LgDocument | null): LgHomeworkContext 
   if (!document) return null;
   const regions = document.regions.map(({ region_id, label, text }) => ({ region_id, label, text }));
   return { filename: document.filename, regions };
-}
-
-// A spot the student circled, as the tutor sees it: its ID and the region or question it's on.
-// has_work, when given, says whether any of the student's writing is inside it.
-export function selectionContext(state: LgState, selection: LgBoardSelection, has_work?: boolean): LgSelectionContext {
-  const question = selection.question_id ? findBoardQuestion(state, selection.question_id) : undefined;
-  const region = selection.region_id ? findRegion(getActiveDocument(state), selection.region_id) : undefined;
-  const on = question
-    ? { id: question.id, label: `Question ${question.id.slice(1)}` }
-    : region
-      ? { id: region.region_id, label: region.label }
-      : null;
-  return { id: selection.id, on, ...(has_work === undefined ? {} : { has_work }) };
 }
 
 // Each session starts from a one-time credential that our API gets from ElevenLabs (T-203). The agent
@@ -228,7 +150,6 @@ function sessionOptions({ tutor, textOnly }: SessionRequest, credential: Session
     homeworkContext(getActiveDocument(state)),
     getActiveConversation(state)?.canvas_lms_assignment ?? null,
     getBoardQuestions(state).map(({ id, text: question }) => ({ id, text: question })),
-    getBoardSelections(state).map((selection) => selectionContext(state, selection)),
   );
   return {
     ...credential,
@@ -382,8 +303,7 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
     return true;
   }
 
-  // Check my work. With a session, the tutor responds; without one, the work gets its mark and
-  // the hint goes on the board.
+  // Check my work. With a session, the tutor responds; without one, the hint goes on the board.
   async function checkWork(region_id: string) {
     if (checking) return;
     setChecking(true);
@@ -396,13 +316,9 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
     onLine("system", `Checked ${outcome.label}: ${CHECK_STATUS_LABEL[outcome.check.status]}.`);
     if (connected) {
       conversation.sendUserMessage(`[Check my work]\n${workReport(outcome)}`);
-    } else {
-      const verdict = markVerdictFor(outcome.check.status);
-      if (outcome.region_id && verdict) applyLgAction({ type: "mark_work", region_id: outcome.region_id, verdict });
-      if (outcome.check.hint) {
-        onLine("system", outcome.check.hint);
-        applyLgAction({ type: "write_text", near_region_id: region_id, text: outcome.check.hint });
-      }
+    } else if (outcome.check.hint) {
+      onLine("system", outcome.check.hint);
+      applyLgAction({ type: "write_text", near_region_id: region_id, text: outcome.check.hint });
     }
   }
 
@@ -444,14 +360,6 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
     return true;
   }
 
-  // Background information that must reach the tutor, sent now or as soon as the next session
-  // opens, ahead of whatever waits in sendWhenReady. Unlike sendContextualUpdate, it's kept when
-  // there's no session yet, for one about to start.
-  function sendContextWhenReady(message: string) {
-    if (connected) conversation.sendContextualUpdate(message);
-    else pendingContext.current.push(message);
-  }
-
   const end = useCallback(() => {
     attempt.current += 1;
     restart.current = null;
@@ -476,7 +384,6 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
     end,
     sendWhenReady,
     sendContextualUpdate,
-    sendContextWhenReady,
     muted: conversation.isMuted,
     setMuted: conversation.setMuted,
   };

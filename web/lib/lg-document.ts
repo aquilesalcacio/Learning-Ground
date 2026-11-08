@@ -239,12 +239,10 @@ export async function apiErrorMessage(response: Response, fallback: string): Pro
   return typeof body?.detail === "string" ? body.detail : fallback;
 }
 
-// lines: each printed line of the problem with its own box, so the tutor can mark a phrase.
-// Readings from before lines were read have none.
 export type LgPageReading = {
   page: number;
   page_text: string;
-  problems: { label: string; box_2d: number[]; text: string; lines?: { text: string; box_2d: number[] }[] }[];
+  problems: { label: string; box_2d: number[]; text: string }[];
 };
 
 export type LgReadOutcome =
@@ -253,19 +251,11 @@ export type LgReadOutcome =
   | { ok: false; message: string; stop: boolean };
 
 // Readings by file hash, page and language, so uploading the same file again costs no quota.
-// It lives in localStorage beside the chats, so it stays small. Version 2 added each problem's
-// lines; a version 1 reading has none, so it would leave a re-upload without them, and it goes.
-const CACHE_KEY = "lg-read-cache-v2";
-const OLD_CACHE_KEY = "lg-read-cache-v1";
+// It lives in localStorage beside the chats, so it stays small.
+const CACHE_KEY = "lg-read-cache-v1";
 const CACHE_ENTRIES = 40;
 const CACHE_TEXT_MAX = 600;
 const CACHE_PAGE_TEXT_MAX = 2000;
-// The same caps as a problem's lines in lg-regions.ts: at most CACHE_LINES_MAX lines of
-// CACHE_LINE_TEXT_MAX characters, CACHE_TEXT_MAX characters of them per problem and
-// CACHE_LINES_PAGE_MAX per page. A line is kept whole or not at all, as there.
-const CACHE_LINES_MAX = 12;
-const CACHE_LINE_TEXT_MAX = 160;
-const CACHE_LINES_PAGE_MAX = 4000;
 
 type CacheEntry = { key: string; reading: LgPageReading };
 
@@ -273,14 +263,8 @@ export function readingCacheKey(hash: string, page: number, language: LgLanguage
   return `${hash}:${page}:${language}`;
 }
 
-let oldCacheRemoved = false;
-
 function loadCache(): CacheEntry[] {
   try {
-    if (!oldCacheRemoved) {
-      oldCacheRemoved = true;
-      window.localStorage.removeItem(OLD_CACHE_KEY);
-    }
     const raw = window.localStorage.getItem(CACHE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? parsed : [];
@@ -310,38 +294,15 @@ function capText(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
-const numbers = (value: unknown) => (Array.isArray(value) ? value.map(Number) : []);
-
-// A problem's lines that pageRegions would keep, within what's left of the page's budget.
-function compactLines(lines: unknown, pageBudget: number): { text: string; box_2d: number[] }[] {
-  const kept: { text: string; box_2d: number[] }[] = [];
-  let budget = Math.min(CACHE_TEXT_MAX, pageBudget);
-  for (const line of Array.isArray(lines) ? lines : []) {
-    if (kept.length === CACHE_LINES_MAX || budget <= 0) break;
-    const text = String(line?.text ?? "").replace(/\s+/g, " ").trim();
-    if (!text || text.length > CACHE_LINE_TEXT_MAX) continue;
-    if (text.length > budget) break;
-    budget -= text.length;
-    kept.push({ text, box_2d: numbers(line?.box_2d) });
-  }
-  return kept;
-}
-
 export function compactReading(reading: LgPageReading): LgPageReading {
-  let lineBudget = CACHE_LINES_PAGE_MAX;
   return {
     page: reading.page,
     page_text: capText(String(reading.page_text ?? ""), CACHE_PAGE_TEXT_MAX),
-    problems: (Array.isArray(reading.problems) ? reading.problems : []).map((problem) => {
-      const lines = compactLines(problem.lines, lineBudget);
-      lineBudget -= lines.reduce((sum, line) => sum + line.text.length, 0);
-      return {
-        label: String(problem.label ?? ""),
-        box_2d: numbers(problem.box_2d),
-        text: capText(String(problem.text ?? ""), CACHE_TEXT_MAX),
-        ...(lines.length ? { lines } : {}),
-      };
-    }),
+    problems: (Array.isArray(reading.problems) ? reading.problems : []).map((problem) => ({
+      label: String(problem.label ?? ""),
+      box_2d: Array.isArray(problem.box_2d) ? problem.box_2d.map(Number) : [],
+      text: capText(String(problem.text ?? ""), CACHE_TEXT_MAX),
+    })),
   };
 }
 

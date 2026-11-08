@@ -5,8 +5,7 @@
 Run from api/. With no files, it renders two invented pages and grades them: a math worksheet with
 known problem boxes, and a page with instructions hidden in it. With files (PNG, JPEG, WEBP or PDF),
 it reads every page and only draws the boxes. Each page writes <name>.overlay.png: thin grey boxes
-are the truth, where known, thick coloured boxes are Gemini's problems, and thin coloured boxes
-inside them are each problem's lines, which the tutor's phrase marks rely on. Look at the overlays, because
+are the truth, where known, and thick coloured boxes are Gemini's. Look at the overlays, because
 passing here only means each known problem got a box overlapping it by IoU 0.5 or more.
 
 Each page is one Gemini call, or more if a model is busy. Free-tier quotas are small, so choose models
@@ -156,8 +155,6 @@ def overlay(page: Page, reading: PageReading | None, path: Path) -> None:
         colour = COLOURS[index % len(COLOURS)]
         left, top, right, bottom = pixels(problem.box_2d)
         draw.rectangle((left, top, right, bottom), outline=colour, width=max(3, side // 350))
-        for line in problem.lines:
-            draw.rectangle(pixels(line.box_2d), outline=colour, width=max(1, side // 1000))
         tag = problem.label[:20]
         tag_box = draw.textbbox((left, top), tag, font=font)
         lift = tag_box[3] - tag_box[1] + 8
@@ -220,8 +217,6 @@ async def main() -> None:
             print(f"{'FAIL' if problems else 'PASS'} {page.name} {'; '.join(problems)}")
         for problem in reading.problems:
             print(f"  {problem.label!r:>14} {problem.box_2d}  {problem.text}")
-            for line in problem.lines:
-                print(f"  {'line':>14} {line.box_2d}  {line.text}")
         print("  page_text: " + reading.page_text.replace("\n", "\n             ") + "\n")
         overlay(page, reading, out / f"{page.name}.overlay.png")
     print(f"{len(pages) - failures} of {len(pages)} passed. Overlays in {out}")

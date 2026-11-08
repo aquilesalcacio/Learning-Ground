@@ -2,9 +2,8 @@
 
 import { useSyncExternalStore } from "react";
 import { Box, type Editor, type TLShape } from "tldraw";
-import { findRegion, regionAt, regionWorkBounds, type LgBounds } from "./lg-regions";
-import { growCluster, selectionArea } from "./lg-selection";
-import { findBoardQuestion, findBoardSelection, getActiveDocument, readLgState, subscribeLgState } from "./lg-store";
+import { findRegion, regionFocusBounds, regionWorkBounds, type LgBounds } from "./lg-regions";
+import { findBoardQuestion, getActiveDocument, readLgState, subscribeLgState } from "./lg-store";
 
 // What the back end needs from the board, kept apart from lg-actions.ts so UI work there stays simple.
 // lg-actions.ts calls linkLgBoard when a board opens and noteLgActionTarget for each action.
@@ -41,11 +40,18 @@ function setLgFocusRegion(region_id: string) {
   focusListeners.forEach((listener) => listener());
 }
 
-// A spot the student circled (s1) stands for the region it was drawn on.
 export function noteLgActionTarget(action: { region_id?: string; near_region_id?: string }) {
-  const id = action.region_id ?? action.near_region_id;
-  const region_id = id && /^s\d+$/.test(id) ? findBoardSelection(readLgState(), id)?.region_id : id;
+  const region_id = action.region_id ?? action.near_region_id;
   if (region_id) setLgFocusRegion(region_id);
+}
+
+function contains(area: LgBounds, x: number, y: number) {
+  return x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h;
+}
+
+function regionAt(x: number, y: number) {
+  const document = getActiveDocument(readLgState());
+  return document?.regions.find((item) => contains(regionFocusBounds(document, item), x, y));
 }
 
 // Connects the back end to an open board. Returns the function that disconnects it.
@@ -55,7 +61,7 @@ export function linkLgBoard(editor: Editor) {
     ({ changes }) => {
       for (const record of Object.values(changes.added)) {
         if (record.typeName !== "shape" || record.meta.author === "tutor" || record.meta.kind) continue;
-        const item = regionAt(getActiveDocument(readLgState()), record);
+        const item = regionAt(record.x, record.y);
         if (item) setLgFocusRegion(item.region_id);
       }
     },
@@ -69,101 +75,33 @@ export function linkLgBoard(editor: Editor) {
 
 export type LgRegionCapture = Blob | "no_board" | "unknown_region" | "no_work";
 
-// What the tutor passes to read_student_work for whatever the student drew on their screen, when it
-// isn't in an answer box, a circled spot or a homework problem: "can you see my drawing?"
-export const LG_BOARD_ID = "board";
-
 // The API refuses snapshots over 5 MB. A photographed page can pass that at 2x, so it steps down.
 const MAX_CAPTURE_BYTES = 4.5 * 1024 * 1024;
 const PIXEL_RATIOS = [2, 1.5, 1];
 
-// What the student put on the board themselves: not the tutor's marks, the pages, outlines,
-// questions or circled spots. Checks capture these, and mark_work goes beside them.
-export const isStudentMark = (shape: TLShape) => !shape.meta.kind && shape.meta.author !== "tutor";
-
-// Where a spot the student circled (s1) is now: its loop on the board, which moves with its file,
-// or where it was saved when the loop is gone. Null when there's no such spot.
-export function lgSelectionBounds(id: string): LgBounds | null {
-  const selection = findBoardSelection(readLgState(), id);
-  if (!selection) return null;
-  const editor = linkedEditor;
-  const loop = editor
-    ?.getCurrentPageShapes()
-    .find((shape) => shape.meta.kind === "selection" && shape.meta.selection_id === id);
-  const live = loop && editor?.getShapePageBounds(loop);
-  return selectionArea(live ? { x: live.x, y: live.y, w: live.w, h: live.h } : selection.bounds);
-}
-
-// Whether a shape reaches into an area, even partly.
-function reaches(editor: Editor, shape: TLShape, area: Box) {
-  const box = editor.getShapePageBounds(shape);
-  return !!box && box.minX <= area.maxX && box.maxX >= area.minX && box.minY <= area.maxY && box.maxY >= area.minY;
-}
-
-const marksIn = (editor: Editor, shapes: TLShape[], area: Box) =>
-  shapes.filter((shape) => isStudentMark(shape) && reaches(editor, shape, area));
-// The student's strokes that reach an area, and every stroke of the same drawing (lg-selection.ts).
-function drawingAt(editor: Editor, marks: TLShape[], area: Box): TLShape[] {
-  const boxes = marks.map((shape) => editor.getShapePageBounds(shape));
-  const known = marks.filter((_, index) => boxes[index]);
-  const found = growCluster(area, boxes.filter((item): item is Box => !!item));
-  return found.map((index) => known[index]);
-}
-
-const pagesIn = (editor: Editor, shapes: TLShape[], area: Box) =>
-  shapes.filter((shape) => shape.meta.kind === "page" && reaches(editor, shape, area));
-
-// Whether any of the student's own writing is inside a spot they circled, so the tutor knows to
-// check it rather than explain the printed problem.
-export function lgSelectionHasWork(id: string): boolean {
-  const editor = linkedEditor;
-  const bounds = lgSelectionBounds(id);
-  if (!editor || !bounds) return false;
-  return marksIn(editor, editor.getCurrentPageShapes(), Box.From(bounds)).some((shape) => shape.type !== "image");
-}
+const isStudentMark = (shape: TLShape) => !shape.meta.kind && shape.meta.author !== "tutor";
 
 // A picture of the student's work on a region: their marks and the homework page under them,
 // cropped to the region's working area, without the tutor's marks. For a question the tutor wrote
 // on the board (q1), it's the question's note and what the student wrote in or by its answer box.
-// For a spot the student circled (s1), it's just what's inside the loop: the page and their marks
-// there, without the loop itself. With no homework open and no such question or spot, it's all
-// of the student's marks on the board.
+// With no homework open and no such question, it's all of the student's marks on the board.
 export async function captureLgRegion(region_id: string): Promise<LgRegionCapture> {
   const editor = linkedEditor;
   if (!editor) return "no_board";
   const state = readLgState();
   const document = getActiveDocument(state);
   const question = findBoardQuestion(state, region_id);
-  const selected = lgSelectionBounds(region_id);
   const shapes = editor.getCurrentPageShapes();
 
   let include: TLShape[];
   let bounds: Box;
   // The working area already frames the problem, and wider padding would show the next one.
   let padding = document ? 8 : 16;
-  if (region_id === LG_BOARD_ID) {
-    // What the student sees: their marks on screen, with the homework page under them. With none on
-    // screen, all of them, since the student may have scrolled away from what they mean.
-    const marks = shapes.filter(isStudentMark);
-    const view = editor.getViewportPageBounds();
-    const inView = marks.filter((shape) => reaches(editor, shape, view));
-    const work = inView.length ? inView : marks;
-    if (!work.some((shape) => shape.type !== "image")) return "no_work";
-    bounds = Box.Common(work.flatMap((shape) => editor.getShapePageBounds(shape) ?? []));
-    include = [...pagesIn(editor, shapes, bounds), ...work];
-  } else if (selected) {
-    // Cropped to the loop, so the verdict is on just that part. The page is cropped by the bounds.
-    const area = Box.From(selected);
-    const work = marksIn(editor, shapes, area);
-    if (!work.some((shape) => shape.type !== "image")) return "no_work";
-    include = [...pagesIn(editor, shapes, area), ...work];
-    bounds = area;
-    padding = 8;
-  } else if (question) {
-    // The note shows the question being answered. The student may write a little outside the box,
-    // or draw beside it (a graph, a sketch): every stroke of a drawing that reaches the box comes along.
+  if (question) {
+    // The note shows the question being answered. The student may write a little outside the box.
     const area = Box.From(question.answer).expandBy(24);
-    const work = drawingAt(editor, shapes.filter(isStudentMark), area);
+    const overlapsArea = (shape: TLShape) => !!editor.getShapePageBounds(shape)?.collides(area);
+    const work = shapes.filter((shape) => isStudentMark(shape) && overlapsArea(shape));
     if (!work.some((shape) => shape.type !== "image")) return "no_work";
     const note = shapes.filter((shape) => shape.meta.question === question.id && shape.type === "note");
     include = [...note, ...work];
@@ -173,10 +111,14 @@ export async function captureLgRegion(region_id: string): Promise<LgRegionCaptur
     const item = findRegion(document, region_id);
     if (!item) return "unknown_region";
     const area = Box.From(regionWorkBounds(document, item));
-    const work = marksIn(editor, shapes, area);
+    const overlapsArea = (shape: TLShape) => {
+      const box = editor.getShapePageBounds(shape);
+      return !!box && box.minX <= area.maxX && box.maxX >= area.minX && box.minY <= area.maxY && box.maxY >= area.minY;
+    };
+    const work = shapes.filter((shape) => isStudentMark(shape) && overlapsArea(shape));
     if (!work.some((shape) => shape.type !== "image")) return "no_work";
     // The page images are included whole and cropped by the export bounds.
-    const pages = pagesIn(editor, shapes, area);
+    const pages = shapes.filter((shape) => shape.meta.kind === "page" && overlapsArea(shape));
     const outline = shapes.filter((shape) => shape.meta.kind === "region" && shape.meta.region_id === region_id);
     include = [...pages, ...outline, ...work];
     bounds = Box.Common([area, ...work.flatMap((shape) => editor.getShapePageBounds(shape) ?? [])]);

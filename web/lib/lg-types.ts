@@ -62,12 +62,7 @@ export type LgRegion = {
   // [ymin, xmin, ymax, xmax] on a 0-1000 scale of the page as displayed. Only lg-regions.ts converts it.
   box_2d: [number, number, number, number];
   text: string;
-  // Each printed line of the problem with its own box, so the tutor can mark an exact phrase.
-  // Homework read before lines were read has none, and its marks cover the whole problem.
-  lines?: LgRegionLine[];
 };
-
-export type LgRegionLine = { text: string; box_2d: [number, number, number, number] };
 
 // A chat's homework: one or more files. Pages are numbered across all of them, so region IDs
 // such as p3.q1 stay unique. filename lists every file's name, for the tutor and the chat title.
@@ -98,19 +93,6 @@ export type LgBoardQuestion = {
   answer: { x: number; y: number; w: number; h: number };
 };
 
-// A spot the student circled or tapped with "Show the tutor", to point the tutor at it. Its ID
-// (s1, s2, ...) works like a region ID for the tutor's tools and for Check my work. The loop on
-// the board is a draw shape with meta.kind "selection" and meta.selection_id; it moves with its
-// file, so bounds, saved when it was drawn, is only used when the loop is gone.
-export type LgBoardSelection = {
-  id: string;
-  bounds: { x: number; y: number; w: number; h: number };
-  // What it was drawn on: a homework region, or a question the tutor wrote, which wins.
-  region_id?: string;
-  question_id?: string;
-  created_at: number;
-};
-
 export type ChatSpeaker = "student" | "tutor" | "system";
 
 export type ChatMessage = {
@@ -139,9 +121,7 @@ export type CanvasLmsAssignment = {
 };
 
 export type WorkCheckStatus = "correct" | "incomplete" | "error" | "blank" | "unreadable";
-// topic is the problem's text and at is when it was checked, so get_student_progress can name
-// weak spots. Records saved before them have neither.
-export type WorkCheckRecord = { label: string; status: WorkCheckStatus; topic?: string; at?: number };
+export type WorkCheckRecord = { label: string; status: WorkCheckStatus };
 
 export type CanvasLmsCourse = { name: string; code: string; sections: string[]; start_at: string; end_at: string };
 
@@ -171,12 +151,6 @@ export type Conversation = {
   // question's ID is never reused for another one, even after the tutor clears the board.
   board_questions?: LgBoardQuestion[];
   board_question_count?: number;
-  // The last few questions the tutor wrote here. Unlike board_questions, clear never empties it,
-  // so get_student_progress can tell the tutor not to repeat a practice problem.
-  practice_history?: string[];
-  // Spots the student circled on this chat's board, and how many so far, so an ID is never reused.
-  board_selections?: LgBoardSelection[];
-  board_selection_count?: number;
 };
 
 export type Option<T extends string> = { value: T; label: string };

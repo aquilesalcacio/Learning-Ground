@@ -17,12 +17,10 @@ import {
   toRichText,
 } from "tldraw";
 import { LG_MATH, LG_MATH_MAX, measureLgMath } from "@/components/lg-math-shape";
-import { isStudentMark, lgSelectionBounds, linkLgBoard, noteLgActionTarget } from "./lg-board-link";
+import { linkLgBoard, noteLgActionTarget } from "./lg-board-link";
 import {
   arcAt,
   arrowEnds,
-  axisStroke,
-  densify,
   dotPoints,
   easeOutCubic,
   easeStroke,
@@ -30,13 +28,7 @@ import {
   type InkPoint,
   labelledTicks,
   lastPoint,
-  lineEnds,
   loopPoints,
-  isMarkVerdict,
-  MARK_STROKE_KINDS,
-  markBox,
-  markStrokes,
-  type MarkVerdict,
   type NumberLineLayout,
   type NumberLineMark,
   numberLineLayout,
@@ -44,13 +36,9 @@ import {
   partialPath,
   pathLength,
   roundedRectPoints,
-  type ShapeKind,
-  shapeLayout,
-  type ShapeStroke,
   typedText,
   underlinePoints,
 } from "./lg-ink";
-import { type GraphSpec, graphLayout, tickLabelWidth, Y_LABEL_OFFSET } from "./lg-plot";
 import {
   attachPen,
   enqueuePen,
@@ -74,9 +62,7 @@ import {
   pageFocusBounds,
   pageRegions,
   pageSource,
-  phraseBounds,
   placeNewFile,
-  regionAt,
   regionBounds,
   regionFocusBounds,
   regionMarginX,
@@ -85,72 +71,42 @@ import {
   wholePageRegion,
 } from "./lg-regions";
 import { LgDocumentError, openHomeworkFile, readHomeworkPage } from "./lg-document";
-import { selectionOwner } from "./lg-selection";
 import {
   addBoardQuestion,
-  addBoardSelection,
   appendMessage,
   clearBoardQuestions,
-  clearBoardSelections,
   findBoardQuestion,
-  findBoardSelection,
   getActiveDocument,
   getActiveTutor,
   getBoardQuestions,
-  getBoardSelections,
   getConversationDocument,
   readLgState,
-  removeBoardSelections,
   setConversationDocument,
   setLgDocument,
   startConversation,
   subscribeLgState,
   updateBoardQuestion,
 } from "./lg-store";
-import { droppedMarksUpdate, resolveLanguage } from "./lg-tutor-prompt";
-import {
-  type LgBackground,
-  type LgDocument,
-  type LgDocumentPage,
-  type LgLanguage,
-  type LgRegion,
-  type PenColor,
-  TUTOR_COLORS,
-  type TutorColor,
-} from "./lg-types";
+import { resolveLanguage } from "./lg-tutor-prompt";
+import type { LgBackground, LgDocument, LgDocumentPage, LgLanguage, LgRegion, PenColor } from "./lg-types";
 
 // The seam between the board and the voice session (vision doc, section 8.1).
 // Voice client tools and the test buttons both call applyLgAction and nothing else.
 // Each action becomes a plan for the tutor's pen (lg-tutor-pen.ts), which draws it by hand while
 // the tutor talks: it travels to the problem, then inks the mark stroke by stroke. Tutor marks
 // stay out of the undo history, so the student's undo only ever takes their own work.
-// Actions aim at a homework region (p1.q3), at a question the tutor wrote on the board (q1), so
-// the tutor can teach on a blank board too, or at a spot the student circled to show it (s1).
-// Graphs and shapes stand on their own, so they can also go on a free spot of the board.
-// Underlines and highlights can take a phrase from the problem's text, to mark just those words.
+// Actions aim at a homework region (p1.q3) or at a question the tutor wrote on the board (q1),
+// so the tutor can teach on a blank board too.
 export type LgAction =
   | { type: "focus_region"; region_id: string }
   | { type: "point_at"; region_id: string }
   | { type: "circle_region"; region_id: string }
-  | { type: "underline_region"; region_id: string; text?: string }
-  | { type: "highlight_region"; region_id: string; text?: string }
+  | { type: "underline_region"; region_id: string }
+  | { type: "highlight_region"; region_id: string }
   | { type: "draw_arrow"; from_region_id: string; to_region_id: string; label?: string }
-  | { type: "draw_line"; from_region_id: string; to_region_id: string; label?: string; dashed?: boolean }
-  | { type: "mark_work"; region_id: string; verdict: MarkVerdict }
   | { type: "write_text"; near_region_id: string; text: string }
   | { type: "write_math"; near_region_id: string; latex: string }
   | { type: "number_line"; near_region_id: string; min: number; max: number; marks?: NumberLineMark[] }
-  | {
-      type: "plot_graph";
-      near_region_id?: string;
-      functions: string;
-      x_min: number;
-      x_max: number;
-      y_min?: number;
-      y_max?: number;
-      points?: string;
-    }
-  | { type: "draw_shape"; near_region_id?: string; shape: ShapeKind; labels?: string; parts?: number; shaded?: number }
   | { type: "clear" };
 
 const MARGIN_LINE_GAP = 12;
@@ -182,13 +138,6 @@ function tutorColor() {
   return getActiveTutor(readLgState()).color;
 }
 
-// The tutor's colour first, then its other colours for a second and third curve. Never black,
-// which is the student's pen.
-function curveColors(): TutorColor[] {
-  const own = tutorColor();
-  return [own, ...TUTOR_COLORS.filter((color) => color !== own)];
-}
-
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const lerp = (from: InkPoint, to: InkPoint, t: number) => ({ x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t });
 // Typing speed for the tutor's handwriting.
@@ -203,14 +152,8 @@ const exists = (editor: Editor, id: TLShapeId) => !!editor.getShape(id);
 // What the tutor's tools aim at, in board positions.
 type LgTarget = {
   id: string;
-  kind: "region" | "question" | "selection";
-  // What notes about it are filed under (meta.near), so they stack below the others there. A
-  // circled spot's notes go with the region or question it's on.
-  near: string;
   // The problem as printed, or the question's note. Circles, underlines and arrows use this.
   bounds: LgBounds;
-  // All of it: for a question, its note and its answer box. Lines join these.
-  whole: LgBounds;
   // What the board frames to show it, with room for notes.
   focus: LgBounds;
   // Where notes about it are written: from (marginX, top), each below the last.
@@ -226,10 +169,7 @@ function resolveTarget(document: LgDocument | null, id: string): LgTarget | null
     const bounds = regionBounds(document, item);
     return {
       id,
-      kind: "region",
-      near: id,
       bounds,
-      whole: bounds,
       focus: regionFocusBounds(document, item),
       marginX: regionMarginX(document, item),
       top: bounds.y,
@@ -237,55 +177,16 @@ function resolveTarget(document: LgDocument | null, id: string): LgTarget | null
     };
   }
   const question = findBoardQuestion(readLgState(), id);
-  if (!question) return selectionTarget(document, id);
+  if (!question) return null;
   const all = Box.Common([Box.From(question.card), Box.From(question.answer)]);
   // Notes about a written question go under its answer box, in the same column.
   return {
     id,
-    kind: "question",
-    near: id,
     bounds: question.card,
-    whole: all.toJson(),
     focus: { x: all.x - 48, y: all.y - 24, w: all.w + 96, h: all.h + 48 + NOTE_LINE_HEIGHT * 4 },
     marginX: question.card.x,
     top: question.card.y,
     work: question.answer,
-  };
-}
-
-// A spot the student circled: where its loop is now, which moves with its file. Notes about it go
-// in the margin of the region or question it's on, beside the spot or below the notes already
-// there; on a blank board, just right of it.
-function selectionTarget(document: LgDocument | null, id: string): LgTarget | null {
-  const selection = findBoardSelection(readLgState(), id);
-  const bounds = selection && lgSelectionBounds(id);
-  if (!selection || !bounds) return null;
-  const parentId = selection.question_id ?? selection.region_id;
-  const parent = parentId ? resolveTarget(document, parentId) : null;
-  const shown = Box.From(bounds).expandBy(24);
-  if (parent) {
-    return {
-      id,
-      kind: "selection",
-      near: parent.near,
-      bounds,
-      whole: bounds,
-      focus: Box.Common([Box.From(parent.focus), shown]).toJson(),
-      marginX: parent.marginX,
-      top: Math.max(parent.top, bounds.y),
-      work: bounds,
-    };
-  }
-  return {
-    id,
-    kind: "selection",
-    near: id,
-    bounds,
-    whole: bounds,
-    focus: { x: shown.x, y: shown.y, w: shown.w + 32 + MARGIN_WIDTH, h: shown.h + NOTE_LINE_HEIGHT * 4 },
-    marginX: bounds.x + bounds.w + 32,
-    top: bounds.y,
-    work: bounds,
   };
 }
 
@@ -349,12 +250,9 @@ type InkOptions = {
   near?: string;
   question?: string;
   size?: "s" | "m" | "l";
-  // A closed stroke, filled: "fill" in full colour for a dot, "solid" in a light tint for a shaded part.
-  fill?: "fill" | "solid";
+  fill?: boolean;
   dash?: "draw" | "dashed";
   hold?: boolean;
-  // The tutor's colour unless given, such as for a graph's second curve.
-  color?: TutorColor;
 };
 
 // One stroke, drawn along its points from the first to the last. The points are read when the
@@ -388,21 +286,17 @@ function inkStep(editor: Editor, kind: "draw" | "highlight", source: () => InkPo
           ...base,
           type: "draw",
           props: {
-            color: options.color ?? tutorColor(),
+            color: tutorColor(),
             size,
             dash: options.dash ?? "draw",
-            fill: options.fill ?? "none",
+            fill: options.fill ? "fill" : "none",
             isClosed: !!options.fill,
             segments,
             isComplete: false,
           },
         });
       } else {
-        editor.createShape({
-          ...base,
-          type: "highlight",
-          props: { color: options.color ?? tutorColor(), size, segments, isComplete: false },
-        });
+        editor.createShape({ ...base, type: "highlight", props: { color: tutorColor(), size, segments, isComplete: false } });
       }
     },
     frame: (t) => {
@@ -419,7 +313,7 @@ function inkStep(editor: Editor, kind: "draw" | "highlight", source: () => InkPo
 function nextNoteY(editor: Editor, target: LgTarget): number {
   return editor
     .getCurrentPageShapes()
-    .filter((shape) => shape.meta.author === "tutor" && (shape.meta.near === target.near || shape.meta.question === target.near))
+    .filter((shape) => shape.meta.author === "tutor" && (shape.meta.near === target.id || shape.meta.question === target.id))
     .reduce((next, shape) => Math.max(next, (editor.getShapePageBounds(shape)?.maxY ?? 0) + MARGIN_LINE_GAP), target.top);
 }
 
@@ -437,7 +331,7 @@ function textStep(
   editor: Editor,
   place: () => TextPlace,
   text: string,
-  options: { near?: string; question?: string; font?: "draw" | "mono"; duration?: number; hold?: boolean; color?: TutorColor },
+  options: { near?: string; question?: string; font?: "draw" | "mono"; duration?: number; hold?: boolean },
 ): PenStep {
   const id = createShapeId();
   let spot: TextPlace = { x: 0, y: 0, w: MARGIN_WIDTH, align: "start" };
@@ -468,7 +362,7 @@ function textStep(
         meta: tutorMeta(options.near, options.question),
         props: {
           richText: toRichText(""),
-          color: options.color ?? tutorColor(),
+          color: tutorColor(),
           size: "s",
           font: options.font ?? "draw",
           autoSize: false,
@@ -487,7 +381,7 @@ function textStep(
 
 function noteSteps(editor: Editor, target: LgTarget, text: string, font: "draw" | "mono"): PenStep[] {
   const place = (): TextPlace => ({ x: target.marginX, y: nextNoteY(editor, target), w: MARGIN_WIDTH, align: "start" });
-  return [revealTarget(editor, target), textStep(editor, place, text, { near: target.near, font }), penRestStep()];
+  return [revealTarget(editor, target), textStep(editor, place, text, { near: target.id, font }), penRestStep()];
 }
 
 // A hint equation, rendered with KaTeX and revealed left to right as the pen writes along it.
@@ -513,7 +407,7 @@ function mathSteps(editor: Editor, target: LgTarget, latex: string): PenStep[] {
           type: LG_MATH,
           x: spot.x,
           y: spot.y,
-          meta: tutorMeta(target.near),
+          meta: tutorMeta(target.id),
           props: { latex: source, w: size.w, h: size.h, color: tutorColor(), reveal: 0 },
         });
       },
@@ -530,23 +424,13 @@ function mathSteps(editor: Editor, target: LgTarget, latex: string): PenStep[] {
   ];
 }
 
-// draw_line's plain line: straight between the two items' nearest edges, with no arrowhead, and
-// dashed when asked. Everything else about it is an arrow's.
-type ArrowStyle = { line?: boolean; dashed?: boolean };
-
-const common = (a: LgBounds, b: LgBounds) => Box.Common([Box.From(a), Box.From(b)]).toJson();
-
 // The arrow grows along its final curve, then its label is written at the curve's middle.
-function arrowSteps(editor: Editor, from: LgTarget, to: LgTarget, label: string, style: ArrowStyle = {}): PenStep[] {
+function arrowSteps(editor: Editor, from: LgTarget, to: LgTarget, label: string): PenStep[] {
   const id = createShapeId();
-  const { start, end, bend } = style.line ? { ...lineEnds(from.whole, to.whole), bend: 0 } : arrowEnds(from.bounds, to.bounds);
+  const { start, end, bend } = arrowEnds(from.bounds, to.bounds);
   const middle = arcAt(start, end, bend, 0.5).point;
-  const look = style.line ? { arrowheadEnd: "none" as const, dash: style.dashed ? ("dashed" as const) : ("draw" as const) } : {};
   const steps: PenStep[] = [
-    // A line shows both ends, since it's about how the two go together.
-    style.line
-      ? revealStep(editor, () => common(from.whole, to.whole), () => common(from.focus, to.focus))
-      : revealTarget(editor, from),
+    revealTarget(editor, from),
     {
       at: () => start,
       hold: true,
@@ -560,7 +444,7 @@ function arrowSteps(editor: Editor, from: LgTarget, to: LgTarget, label: string,
           x: 0,
           y: 0,
           meta: tutorMeta(),
-          props: { color: tutorColor(), start, end: first.point, bend: first.bend, richText: toRichText(""), ...look },
+          props: { color: tutorColor(), start, end: first.point, bend: first.bend, richText: toRichText("") },
         });
       },
       frame: (t) => {
@@ -592,78 +476,6 @@ function arrowSteps(editor: Editor, from: LgTarget, to: LgTarget, label: string,
   return steps;
 }
 
-// mark_work: a check in green, a cross in red, or a question mark in the tutor's colour.
-const MARK_COLORS: Record<MarkVerdict, TutorColor | undefined> = { correct: "green", incorrect: "red", check_again: undefined };
-
-// The student's own writing on a target: their marks whose centre is in a problem's working area
-// or a question's answer box. A problem's working area runs across the page, so for problems side
-// by side only the writing that belongs to this one counts. Null when there's none.
-function studentWorkBounds(editor: Editor, document: LgDocument | null, target: LgTarget): LgBounds | null {
-  const area = Box.From(target.work).expandBy(target.kind === "question" ? 24 : 0);
-  const boxes = editor
-    .getCurrentPageShapes()
-    .filter(isStudentMark)
-    .flatMap((shape) => editor.getShapePageBounds(shape) ?? [])
-    .filter(
-      (box) =>
-        area.containsPoint(box.center) && (target.kind !== "region" || regionAt(document, box.center)?.region_id === target.id),
-    );
-  return boxes.length ? Box.Common(boxes).toJson() : null;
-}
-
-// A check, a cross or a question mark beside the work: right of what the student wrote on a
-// problem or in a question's answer box, or of the problem or the box when they wrote nothing
-// there yet, and right of a circled spot's loop. Placed when it starts, so it sees the work then.
-function markSteps(editor: Editor, document: LgDocument | null, target: LgTarget, verdict: MarkVerdict): PenStep[] {
-  if (!isMarkVerdict(verdict)) {
-    console.warn(`[lg] mark_work doesn't know the verdict "${verdict}".`);
-    return [];
-  }
-  const kinds = MARK_STROKE_KINDS[verdict];
-  const seed = seedFor(target.id);
-  let box: LgBounds | null = null;
-  const place = () =>
-    (box ??= markBox(
-      target.kind === "selection"
-        ? target.bounds
-        : (studentWorkBounds(editor, document, target) ?? (target.kind === "question" ? target.work : target.bounds)),
-    ));
-  let strokes: ReturnType<typeof markStrokes> | null = null;
-  const placed = () => (strokes ??= markStrokes(verdict, place(), seed));
-  const color = MARK_COLORS[verdict];
-  return [
-    revealStep(
-      editor,
-      () => common(target.bounds, place()),
-      () => common(target.focus, Box.From(place()).expandBy(24).toJson()),
-    ),
-    ...kinds.map((kind, index) =>
-      inkStep(editor, "draw", () => placed()[index].points, {
-        duration: kind === "dot" ? 120 : 320,
-        color,
-        ...(kind === "dot" ? { fill: "fill" as const, size: "s" as const } : {}),
-        hold: index === 0,
-      }),
-    ),
-    penRestStep(() => {
-      const at = place();
-      return { x: at.x + at.w + 14 / editor.getZoomLevel(), y: at.y + at.h / 2 };
-    }),
-  ];
-}
-
-// Where an underline or a highlight goes: just the phrase, on each line it runs across, when the
-// target is a problem read with its lines. Otherwise, or when the lines don't hold the phrase, the
-// whole target, as before lines were read.
-function phraseSpots(document: LgDocument | null, target: LgTarget, text?: string): LgBounds[] {
-  const phrase = text?.trim();
-  if (!phrase) return [target.bounds];
-  const item = target.kind === "region" ? findRegion(document, target.id) : undefined;
-  const spots = document && item ? phraseBounds(document, item, phrase) : [];
-  if (!spots.length) console.info(`[lg] "${phrase}" isn't on a line of ${target.id}, so all of it is marked.`);
-  return spots.length ? spots : [target.bounds];
-}
-
 // A number line beside a target: the axis is drawn left to right with its ticks, the numbers
 // are written under it, then each marked value gets a dot and its label.
 function numberLineSteps(editor: Editor, target: LgTarget, min: number, max: number, marks: NumberLineMark[]): PenStep[] | null {
@@ -673,7 +485,7 @@ function numberLineSteps(editor: Editor, target: LgTarget, min: number, max: num
   // Placed once, when the axis starts, below anything already written beside the target.
   const place = () =>
     (layout ??= numberLineLayout({ x: target.marginX, y: nextNoteY(editor, target) }, MARGIN_WIDTH, min, max, marks));
-  const near = target.near;
+  const near = target.id;
   const steps: PenStep[] = [
     revealTarget(editor, target),
     inkStep(
@@ -713,7 +525,7 @@ function numberLineSteps(editor: Editor, target: LgTarget, min: number, max: num
           const at = center();
           return at ? dotPoints(at, 5) : [];
         },
-        { duration: 160, near, size: "s", fill: "fill", hold: false },
+        { duration: 160, near, size: "s", fill: true, hold: false },
       ),
       textStep(
         editor,
@@ -736,194 +548,21 @@ function numberLineSteps(editor: Editor, target: LgTarget, min: number, max: num
   return steps;
 }
 
-// Graphs and shapes: laid out once from (0, 0) by lg-plot.ts and lg-ink.ts, and moved into place
-// when their first step starts. Beside a target they go in its margin, below what's already
-// written there; with no target, on a free spot of the board.
-function figurePlace(editor: Editor, target: LgTarget | null, size: { w: number; h: number }) {
-  let origin: InkPoint | null = null;
-  const place = () =>
-    (origin ??= target ? { x: target.marginX, y: nextNoteY(editor, target) } : freeSpot(editor, size.w, size.h));
-  return {
-    at: (point: InkPoint): InkPoint => {
-      const by = place();
-      return { x: by.x + point.x, y: by.y + point.y };
-    },
-    box: (): LgBounds => {
-      const by = place();
-      return { x: by.x, y: by.y, w: size.w, h: size.h };
-    },
-  };
-}
-
-// Shows the figure before it's drawn, with its target when it has one.
-function revealFigure(editor: Editor, target: LgTarget | null, box: () => LgBounds): PenStep {
-  return revealStep(editor, box, () => {
-    const shown = Box.From(box()).expandBy(24);
-    return target ? Box.Common([Box.From(target.focus), shown]) : shown;
-  });
-}
-
-const restBelow = (editor: Editor, box: () => LgBounds) =>
-  penRestStep(() => {
-    const placed = box();
-    const zoom = editor.getZoomLevel();
-    return { x: placed.x + placed.w + 14 / zoom, y: placed.y + placed.h - 10 / zoom };
-  });
-
-const CURVE_MS = 900;
-
-// A graph: the axes with their ticks, the numbers, each curve left to right in its own colour,
-// one stroke per unbroken piece, then a dot and a label for each point. A function that can't be
-// read draws nothing: the reason is logged and no steps come back.
-function graphSteps(editor: Editor, target: LgTarget | null, spec: GraphSpec): PenStep[] {
-  const graph = graphLayout(spec);
-  if (!graph.ok) {
-    console.warn(`[lg] plot_graph can't draw this: ${graph.error}.`, spec);
-    return [];
-  }
-  if (graph.note) console.warn(`[lg] plot_graph: ${graph.note}.`, spec);
-  const { layout } = graph;
-  const { at, box } = figurePlace(editor, target, layout.box);
-  const near = target?.near;
-  const axis = (ends: [InkPoint, InkPoint], ticks: { at: InkPoint }[]) => () =>
-    axisStroke(at(ends[0]), at(ends[1]), ticks.map((tick) => at(tick.at)));
-  const steps: PenStep[] = [
-    revealFigure(editor, target, box),
-    inkStep(editor, "draw", axis(layout.xAxis, layout.xTicks), { duration: 520, near, size: "s" }),
-    inkStep(editor, "draw", axis(layout.yAxis, layout.yTicks), { duration: 440, near, size: "s", hold: false }),
-  ];
-  const label = (text: string, place: () => TextPlace) => textStep(editor, place, text, { near, duration: 90, hold: false });
-  // Each number in a box as wide as its text, so it stays on one line, on its axis's label side.
-  for (const tick of layout.xTicks.filter((item) => item.label)) {
-    const w = tickLabelWidth(tick.label);
-    steps.push(
-      label(tick.label, () => {
-        const spot = at(tick.at);
-        const y = layout.xLabelSide === "below" ? spot.y + 7 : spot.y - 7 - NOTE_LINE_HEIGHT;
-        return { x: spot.x - w / 2, y, w, align: "middle" };
-      }),
-    );
-  }
-  for (const tick of layout.yTicks.filter((item) => item.label)) {
-    const w = tickLabelWidth(tick.label);
-    steps.push(
-      label(tick.label, () => {
-        const spot = at(tick.at);
-        const x = layout.yLabelSide === "left" ? spot.x - Y_LABEL_OFFSET - w : spot.x + Y_LABEL_OFFSET;
-        return { x, y: spot.y - NOTE_LINE_HEIGHT / 2, w, align: "middle" };
-      }),
-    );
-  }
-  const colors = curveColors();
-  layout.curves.forEach((pieces, index) => {
-    const total = pieces.reduce((sum, piece) => sum + pathLength(piece), 0) || 1;
-    for (const piece of pieces) {
-      steps.push(
-        inkStep(editor, "draw", () => densify(piece.map(at)), {
-          duration: Math.max(60, (CURVE_MS * pathLength(piece)) / total),
-          near,
-          color: colors[index % colors.length],
-          hold: false,
-        }),
-      );
-    }
-  });
-  for (const point of layout.points) {
-    steps.push(
-      inkStep(editor, "draw", () => dotPoints(at(point.at), 4), { duration: 140, near, size: "s", fill: "fill", hold: false }),
-      textStep(
-        editor,
-        () => {
-          const spot = at(point.at);
-          const w = Array.from(point.label).length * NOTE_CHAR_WIDTH + 12;
-          return { x: spot.x + 6, y: spot.y - NOTE_LINE_HEIGHT - 2, w, align: "start" };
-        },
-        point.label,
-        { near, duration: typingMs(point.label, 120, 450), hold: false },
-      ),
-    );
-  }
-  steps.push(restBelow(editor, box));
-  return steps;
-}
-
-// How each part of a shape is drawn.
-const SHAPE_INK: Record<ShapeStroke["kind"], Omit<InkOptions, "duration" | "near"> & { duration?: number }> = {
-  outline: { size: "m" },
-  divider: { duration: 140, size: "s", hold: false },
-  shade: { duration: 220, size: "s", fill: "solid", hold: false },
-  marker: { duration: 220, size: "s", hold: false },
-  dot: { duration: 100, size: "s", fill: "fill", hold: false },
-  guide: { duration: 320, size: "s", dash: "dashed", hold: false },
-};
-
-// A shape: its outline by hand, then a fraction's dividers and shaded parts, the right-angle
-// marker, radius or height, and its labels, letter by letter. A shape it doesn't know draws
-// nothing: the reason is logged and no steps come back.
-function shapeSteps(editor: Editor, target: LgTarget | null, action: Extract<LgAction, { type: "draw_shape" }>): PenStep[] {
-  const layout = shapeLayout(action.shape, action, seedFor(target?.id ?? "board"));
-  if (!layout) {
-    console.warn(`[lg] draw_shape doesn't know the shape "${action.shape}".`, action);
-    return [];
-  }
-  const { at, box } = figurePlace(editor, target, layout.box);
-  const near = target?.near;
-  const steps: PenStep[] = [revealFigure(editor, target, box)];
-  for (const stroke of layout.strokes) {
-    const { duration, ...ink } = SHAPE_INK[stroke.kind];
-    steps.push(
-      inkStep(editor, "draw", () => stroke.points.map(at), {
-        ...ink,
-        near,
-        duration: duration ?? clamp(pathLength(stroke.points) * 1.4, 500, 1100),
-      }),
-    );
-  }
-  for (const label of layout.labels) {
-    const w = Array.from(label.text).length * NOTE_CHAR_WIDTH + 16;
-    steps.push(
-      textStep(
-        editor,
-        () => {
-          const spot = at(label.at);
-          return { x: spot.x - w / 2, y: spot.y - NOTE_LINE_HEIGHT / 2, w, align: "middle" };
-        },
-        label.text,
-        { near, duration: typingMs(label.text, 120, 500), hold: false },
-      ),
-    );
-  }
-  steps.push(restBelow(editor, box));
-  return steps;
-}
-
 // The chat the board belongs to, started now if this is the start screen's board.
 function boardConversation(): string {
   return readLgState().active_conversation_id ?? startConversation();
 }
 
-// Every tutor mark fades out together, then goes, with the tutor's written questions and the
-// spots the student circled. The student's work stays, including what they wrote in an answer box.
+// Every tutor mark fades out together, then goes, with the tutor's written questions.
+// The student's work stays, including what they wrote in an answer box.
 function clearSteps(editor: Editor): PenStep[] {
-  // What's on the board now. The tutor often calls clear and ask_question together: the new question
-  // is saved at once, before this fade-out ends, and must not be cleared with the old ones.
-  const state = readLgState();
-  const conversation_id = state.active_conversation_id;
-  const questionIds = getBoardQuestions(state).map((question) => question.id);
-  const selectionIds = getBoardSelections(state).map((selection) => selection.id);
   let marks: TLShape[] = [];
   return [
     {
       duration: 220,
       mode: "idle",
       begin: () => {
-        marks = editor
-          .getCurrentPageShapes()
-          .filter(
-            (shape) =>
-              shape.meta.author === "tutor" ||
-              (shape.meta.kind === "selection" && selectionIds.includes(String(shape.meta.selection_id))),
-          );
+        marks = editor.getCurrentPageShapes().filter((shape) => shape.meta.author === "tutor");
       },
       frame: (t) => {
         editor.updateShapes(
@@ -934,16 +573,14 @@ function clearSteps(editor: Editor): PenStep[] {
       },
       end: () => {
         editor.deleteShapes(marks.map((shape) => shape.id).filter((id) => exists(editor, id)));
-        if (conversation_id) {
-          clearBoardQuestions(conversation_id, questionIds);
-          clearBoardSelections(conversation_id, selectionIds);
-        }
+        const conversation_id = readLgState().active_conversation_id;
+        if (conversation_id) clearBoardQuestions(conversation_id);
       },
     },
   ];
 }
 
-function targetSteps(editor: Editor, document: LgDocument | null, target: LgTarget, action: LgAction): PenStep[] | null {
+function targetSteps(editor: Editor, target: LgTarget, action: LgAction): PenStep[] | null {
   const rest = penRestStep(besideTarget(editor, target));
   switch (action.type) {
     case "focus_region":
@@ -955,29 +592,14 @@ function targetSteps(editor: Editor, document: LgDocument | null, target: LgTarg
       return [revealTarget(editor, target), inkStep(editor, "draw", () => points, { duration: 560 }), rest];
     }
     case "underline_region": {
-      const strokes = phraseSpots(document, target, action.text).map((spot) => underlinePoints(spot, seedFor(target.id)));
-      return [
-        revealTarget(editor, target),
-        ...strokes.map((points, index) =>
-          inkStep(editor, "draw", () => points, { duration: clamp(pathLength(points) * 0.6, 200, 340), hold: index === 0 }),
-        ),
-        rest,
-      ];
+      const points = underlinePoints(target.bounds, seedFor(target.id));
+      return [revealTarget(editor, target), inkStep(editor, "draw", () => points, { duration: 340 }), rest];
     }
     case "highlight_region": {
-      const strokes = phraseSpots(document, target, action.text).map((spot) =>
-        highlightPoints(spot, seedFor(target.id), HIGHLIGHT_WIDTH),
-      );
-      return [
-        revealTarget(editor, target),
-        ...strokes.map((points, index) =>
-          inkStep(editor, "highlight", () => points, { duration: clamp(pathLength(points) * 0.8, 260, 1300), hold: index === 0 }),
-        ),
-        rest,
-      ];
+      const points = highlightPoints(target.bounds, seedFor(target.id), HIGHLIGHT_WIDTH);
+      const duration = clamp(pathLength(points) * 0.8, 380, 1300);
+      return [revealTarget(editor, target), inkStep(editor, "highlight", () => points, { duration }), rest];
     }
-    case "mark_work":
-      return markSteps(editor, document, target, action.verdict);
     case "write_text":
       return noteSteps(editor, target, action.text, "draw");
     case "write_math":
@@ -989,28 +611,15 @@ function targetSteps(editor: Editor, document: LgDocument | null, target: LgTarg
   }
 }
 
-// The steps for an action, or null when it aims at nothing on the board. A figure that can't be
-// drawn logs why and comes back with no steps.
 function planLgAction(editor: Editor, document: LgDocument | null, action: LgAction): PenStep[] | null {
   if (action.type === "clear") return clearSteps(editor);
-  if (action.type === "plot_graph" || action.type === "draw_shape") {
-    // A figure means something on its own, so one aimed at an ID that isn't on the board goes on
-    // a free spot instead of being dropped.
-    const target = action.near_region_id ? resolveTarget(document, action.near_region_id) : null;
-    if (action.near_region_id && !target) {
-      console.warn("[lg] No region or written question has this ID, so it goes on a free spot:", action);
-    }
-    return action.type === "plot_graph" ? graphSteps(editor, target, action) : shapeSteps(editor, target, action);
-  }
-  if (action.type === "draw_arrow" || action.type === "draw_line") {
+  if (action.type === "draw_arrow") {
     const from = resolveTarget(document, action.from_region_id);
     const to = resolveTarget(document, action.to_region_id);
-    if (!from || !to) return null;
-    const style = action.type === "draw_line" ? { line: true, dashed: !!action.dashed } : {};
-    return arrowSteps(editor, from, to, action.label ?? "", style);
+    return from && to ? arrowSteps(editor, from, to, action.label ?? "") : null;
   }
   const target = resolveTarget(document, "region_id" in action ? action.region_id : action.near_region_id);
-  return target ? targetSteps(editor, document, target, action) : null;
+  return target ? targetSteps(editor, target, action) : null;
 }
 
 export function applyLgAction(action: LgAction) {
@@ -1025,52 +634,9 @@ export function applyLgAction(action: LgAction) {
   if (!steps) {
     // Without homework or a written question there's nothing to aim at: the tutor would mark empty space.
     console.warn("[lg] This action names no region or written question on the board, or can't be drawn:", action);
-    noteDroppedMark(action);
     return;
   }
-  // A figure that can't be drawn has already said why.
-  if (!steps.length) return;
   enqueuePen(steps);
-}
-
-// Marks the tutor aimed at IDs that aren't on the board. Its drawing tools don't wait for an answer,
-// so it would believe it drew them: chat-dock.tsx tells it otherwise, as a contextual update. A
-// burst of them (several tools in one reply) is gathered into one update.
-const DROPPED_BATCH_MS = 300;
-const droppedListeners = new Set<(message: string) => void>();
-let droppedMarks: { tool: string; ids: string[] }[] = [];
-let droppedTimer: ReturnType<typeof setTimeout> | null = null;
-
-// Told, with the update's text, when the tutor's marks named IDs that aren't on the board.
-export function onLgMarksDropped(listener: (message: string) => void) {
-  droppedListeners.add(listener);
-  return () => {
-    droppedListeners.delete(listener);
-  };
-}
-
-// Every ID the tutor can aim at now: the homework's regions, its questions and the student's circles.
-function boardIds(): string[] {
-  const state = readLgState();
-  return [
-    ...(getActiveDocument(state)?.regions.map((region) => region.region_id) ?? []),
-    ...getBoardQuestions(state).map((question) => question.id),
-    ...getBoardSelections(state).map((selection) => selection.id),
-  ];
-}
-
-function noteDroppedMark(action: LgAction) {
-  const named = action as { region_id?: string; near_region_id?: string; from_region_id?: string; to_region_id?: string };
-  const ids = [named.region_id, named.near_region_id, named.from_region_id, named.to_region_id].filter(
-    (id): id is string => !!id && !boardIds().includes(id),
-  );
-  droppedMarks.push({ tool: action.type, ids });
-  droppedTimer ??= setTimeout(() => {
-    const message = droppedMarksUpdate(droppedMarks, boardIds());
-    droppedMarks = [];
-    droppedTimer = null;
-    droppedListeners.forEach((listener) => listener(message));
-  }, DROPPED_BATCH_MS);
 }
 
 // A free spot on screen for a question written on a blank board: centred near the top of the
@@ -1114,7 +680,7 @@ export function askLgQuestion(question: string, near_region_id = ""): LgAskOutco
   const added = addBoardQuestion(conversation_id, (id) => ({
     id,
     text,
-    near: near?.near ?? "",
+    near: near?.id ?? "",
     card: { x: guess.x, y: guess.y, w: QUESTION_NOTE, h: QUESTION_NOTE },
     answer: { x: guess.x, y: guess.y + QUESTION_NOTE + ANSWER_TOP_GAP, w: ANSWER_W, h: ANSWER_H },
   }));
@@ -1150,7 +716,7 @@ function questionSteps(editor: Editor, conversation_id: string, id: string, text
     shown = next;
     editor.updateShape({ id: noteId, type: "note", props: { richText: toRichText(next) } });
   };
-  const nearId = near?.near;
+  const nearId = near?.id;
   return [
     revealStep(editor, whole, () => {
       const box = whole();
@@ -1221,17 +787,7 @@ function questionSteps(editor: Editor, conversation_id: string, id: string, text
 export function lookAtLgWork(region_id: string) {
   const target = lgEditor ? resolveTarget(getActiveDocument(readLgState()), region_id) : null;
   const work = target?.work;
-  // The whole board ("board") has no spot of its own, so the pen looks from the middle of the view.
-  if (!work) return lookAtLgBoard();
-  penLook({ x: work.x + Math.min(work.w * 0.4, 160), y: work.y + Math.min(work.h * 0.5, 90) });
-}
-
-// While the tutor looks something up that isn't on the board, such as the student's progress, its
-// pen thinks in the middle of the view. End it with doneLookingAtLgWork, always: until then the
-// thinking step holds up every mark queued after it.
-export function lookAtLgBoard() {
-  const view = lgEditor?.getViewportPageBounds();
-  penLook(view ? { x: view.x + view.w / 2, y: view.y + view.h / 2 } : null);
+  penLook(work ? { x: work.x + Math.min(work.w * 0.4, 160), y: work.y + Math.min(work.h * 0.5, 90) } : null);
 }
 
 // The pen stops looking; it celebrates when the work was right.
@@ -1280,88 +836,6 @@ function watchAnswers(editor: Editor) {
   };
 }
 
-// "Show the tutor": the student taps or circles something on the board (lg-point-tool.ts). The
-// loop stays as a draw shape in its own style, kept out of the undo history like the homework, and
-// is saved with the chat as s1, s2... so the tutor can aim at it and check what's inside.
-// It carries meta.kind, so it never counts as the student's work or starts a chat by itself.
-const SELECTION_STYLE = { color: "light-blue", dash: "dashed", size: "m", fill: "none" } as const;
-const selectionListeners = new Set<(selection_id: string) => void>();
-
-// Told when the student circles or taps something, with the spot's ID.
-export function onLgSelection(listener: (selection_id: string) => void) {
-  selectionListeners.add(listener);
-  return () => {
-    selectionListeners.delete(listener);
-  };
-}
-
-// Draws the student's loop as it grows, then closed once it's done. Returns the shape's ID.
-export function inkLgSelection(editor: Editor, id: TLShapeId | null, points: InkPoint[], done: boolean): TLShapeId {
-  const origin = points[0] ?? { x: 0, y: 0 };
-  const segments = segmentsOf(points, origin);
-  const shapeId = id ?? createShapeId();
-  editor.run(
-    () => {
-      if (!exists(editor, shapeId)) {
-        editor.createShape({
-          id: shapeId,
-          type: "draw",
-          x: origin.x,
-          y: origin.y,
-          meta: { kind: "selection" },
-          props: { ...SELECTION_STYLE, isClosed: done, segments, isComplete: done },
-        });
-      } else {
-        editor.updateShape({ id: shapeId, type: "draw", x: origin.x, y: origin.y, props: { isClosed: done, segments, isComplete: done } });
-      }
-    },
-    { history: "ignore" },
-  );
-  return shapeId;
-}
-
-export function removeLgSelectionInk(editor: Editor, id: TLShapeId) {
-  if (exists(editor, id)) editor.run(() => editor.deleteShape(id), { history: "ignore" });
-}
-
-// Loops the chat no longer lists go: past the 20 it keeps, cleared, or a loop still being drawn
-// when the board closed.
-function pruneSelectionLoops(editor: Editor, conversation_id: string | null) {
-  const listed = new Set(
-    (readLgState().conversations.find((item) => item.id === conversation_id)?.board_selections ?? []).map((item) => item.id),
-  );
-  const strays = editor
-    .getCurrentPageShapes()
-    .filter((shape) => shape.meta.kind === "selection" && !listed.has(String(shape.meta.selection_id)));
-  if (strays.length) editor.run(() => editor.deleteShapes(strays), { history: "ignore" });
-}
-
-// Saves the finished loop as the next spot, on whatever it was drawn on, and tells the listeners.
-// Circling on the start screen begins the chat, as a first stroke does. Returns the spot's ID.
-export function recordLgSelection(editor: Editor, shapeId: TLShapeId, bounds: LgBounds): string | null {
-  if (editor !== lgEditor) {
-    removeLgSelectionInk(editor, shapeId);
-    return null;
-  }
-  const state = readLgState();
-  const center = { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 };
-  const owner = selectionOwner(center, getBoardQuestions(state), regionAt(getActiveDocument(state), center)?.region_id);
-  const conversation_id = boardConversation();
-  const added = addBoardSelection(conversation_id, (id) => ({ id, bounds, ...owner, created_at: Date.now() }));
-  if (!added) {
-    removeLgSelectionInk(editor, shapeId);
-    return null;
-  }
-  editor.run(
-    () => editor.updateShape({ id: shapeId, type: "draw", meta: { kind: "selection", selection_id: added.id } }),
-    { history: "ignore" },
-  );
-  pruneSelectionLoops(editor, conversation_id);
-  noteLgActionTarget({ region_id: added.id });
-  selectionListeners.forEach((listener) => listener(added.id));
-  return added.id;
-}
-
 export function setLgPenColor(color: PenColor) {
   lgEditor?.setStyleForNextShapes(DefaultColorStyle, color);
   // Recolor an existing selection too, so picking a color after selecting works.
@@ -1372,8 +846,7 @@ export function setLgPenColor(color: PenColor) {
 }
 
 // The tools the floating pencil menu exposes (vision doc, section 4.1).
-// "lg-point" is the student's Show the tutor tool (lg-point-tool.ts).
-export const LG_TOOLS = ["select", "hand", "draw", "eraser", "text", "arrow", "laser", "lg-point"] as const;
+export const LG_TOOLS = ["select", "hand", "draw", "eraser", "text", "arrow", "laser"] as const;
 export type LgTool = (typeof LG_TOOLS)[number];
 
 function isLgTool(id: string): id is LgTool {
@@ -2109,8 +1582,8 @@ export function endLgFileMove() {
   syncRegionShapes(editor, boardDocument());
 }
 
-// Removes one file: its pages and outlines, the tutor's marks on it and the spots circled on it.
-// The student's own marks stay. The last file removes the homework altogether.
+// Removes one file: its pages and outlines, and the tutor's marks on it. The student's own marks
+// stay. The last file removes the homework altogether.
 export function removeLgFile(fileId: string) {
   const editor = lgEditor;
   const conversation_id = lgBoardId;
@@ -2124,7 +1597,6 @@ export function removeLgFile(fileId: string) {
   const numbers = filePageNumbers(document, fileId);
   const shapes = attachedShapes(editor, document, numbers).filter((shape) => shape.meta.kind || shape.meta.author === "tutor");
   const assets = shapes.flatMap((shape) => (shape.meta.kind === "page" ? (pageAssetId(shape) ?? []) : []));
-  const circled = shapes.flatMap((shape) => (shape.meta.kind === "selection" ? String(shape.meta.selection_id) : []));
   editor.run(
     () => {
       editor.deleteShapes(shapes);
@@ -2132,7 +1604,6 @@ export function removeLgFile(fileId: string) {
     },
     { history: "ignore", ignoreShapeLock: true },
   );
-  removeBoardSelections(conversation_id, circled);
   setConversationDocument(conversation_id, (current) => {
     if (!current) return current;
     const files = documentFiles(current).filter((file) => file.id !== fileId);
@@ -2170,8 +1641,6 @@ export function bindLearningGrounds(editor: Editor, boardId: string) {
   lgEditor = editor;
   lgBoardId = boardId;
   checkSavedHomework(editor);
-  // The board saves a moment after the chat, so it can hold a loop the chat no longer lists.
-  pruneSelectionLoops(editor, boardId);
   setLgBackground("plain");
   editor.setCurrentTool("draw");
   focusLgPage(1);
