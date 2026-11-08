@@ -17,7 +17,7 @@ import {
   toRichText,
 } from "tldraw";
 import { LG_MATH, LG_MATH_MAX, measureLgMath } from "@/components/lg-math-shape";
-import { lgSelectionBounds, linkLgBoard, noteLgActionTarget } from "./lg-board-link";
+import { isStudentMark, lgSelectionBounds, linkLgBoard, noteLgActionTarget } from "./lg-board-link";
 import {
   arcAt,
   arrowEnds,
@@ -30,7 +30,13 @@ import {
   type InkPoint,
   labelledTicks,
   lastPoint,
+  lineEnds,
   loopPoints,
+  isMarkVerdict,
+  MARK_STROKE_KINDS,
+  markBox,
+  markStrokes,
+  type MarkVerdict,
   type NumberLineLayout,
   type NumberLineMark,
   numberLineLayout,
@@ -68,6 +74,7 @@ import {
   pageFocusBounds,
   pageRegions,
   pageSource,
+  phraseBounds,
   placeNewFile,
   regionAt,
   regionBounds,
@@ -119,13 +126,16 @@ import {
 // Actions aim at a homework region (p1.q3), at a question the tutor wrote on the board (q1), so
 // the tutor can teach on a blank board too, or at a spot the student circled to show it (s1).
 // Graphs and shapes stand on their own, so they can also go on a free spot of the board.
+// Underlines and highlights can take a phrase from the problem's text, to mark just those words.
 export type LgAction =
   | { type: "focus_region"; region_id: string }
   | { type: "point_at"; region_id: string }
   | { type: "circle_region"; region_id: string }
-  | { type: "underline_region"; region_id: string }
-  | { type: "highlight_region"; region_id: string }
+  | { type: "underline_region"; region_id: string; text?: string }
+  | { type: "highlight_region"; region_id: string; text?: string }
   | { type: "draw_arrow"; from_region_id: string; to_region_id: string; label?: string }
+  | { type: "draw_line"; from_region_id: string; to_region_id: string; label?: string; dashed?: boolean }
+  | { type: "mark_work"; region_id: string; verdict: MarkVerdict }
   | { type: "write_text"; near_region_id: string; text: string }
   | { type: "write_math"; near_region_id: string; latex: string }
   | { type: "number_line"; near_region_id: string; min: number; max: number; marks?: NumberLineMark[] }
@@ -192,11 +202,14 @@ const exists = (editor: Editor, id: TLShapeId) => !!editor.getShape(id);
 // What the tutor's tools aim at, in board positions.
 type LgTarget = {
   id: string;
+  kind: "region" | "question" | "selection";
   // What notes about it are filed under (meta.near), so they stack below the others there. A
   // circled spot's notes go with the region or question it's on.
   near: string;
   // The problem as printed, or the question's note. Circles, underlines and arrows use this.
   bounds: LgBounds;
+  // All of it: for a question, its note and its answer box. Lines join these.
+  whole: LgBounds;
   // What the board frames to show it, with room for notes.
   focus: LgBounds;
   // Where notes about it are written: from (marginX, top), each below the last.
@@ -212,8 +225,10 @@ function resolveTarget(document: LgDocument | null, id: string): LgTarget | null
     const bounds = regionBounds(document, item);
     return {
       id,
+      kind: "region",
       near: id,
       bounds,
+      whole: bounds,
       focus: regionFocusBounds(document, item),
       marginX: regionMarginX(document, item),
       top: bounds.y,
@@ -226,8 +241,10 @@ function resolveTarget(document: LgDocument | null, id: string): LgTarget | null
   // Notes about a written question go under its answer box, in the same column.
   return {
     id,
+    kind: "question",
     near: id,
     bounds: question.card,
+    whole: all.toJson(),
     focus: { x: all.x - 48, y: all.y - 24, w: all.w + 96, h: all.h + 48 + NOTE_LINE_HEIGHT * 4 },
     marginX: question.card.x,
     top: question.card.y,
@@ -248,8 +265,10 @@ function selectionTarget(document: LgDocument | null, id: string): LgTarget | nu
   if (parent) {
     return {
       id,
+      kind: "selection",
       near: parent.near,
       bounds,
+      whole: bounds,
       focus: Box.Common([Box.From(parent.focus), shown]).toJson(),
       marginX: parent.marginX,
       top: Math.max(parent.top, bounds.y),
@@ -258,8 +277,10 @@ function selectionTarget(document: LgDocument | null, id: string): LgTarget | nu
   }
   return {
     id,
+    kind: "selection",
     near: id,
     bounds,
+    whole: bounds,
     focus: { x: shown.x, y: shown.y, w: shown.w + 32 + MARGIN_WIDTH, h: shown.h + NOTE_LINE_HEIGHT * 4 },
     marginX: bounds.x + bounds.w + 32,
     top: bounds.y,
@@ -508,13 +529,23 @@ function mathSteps(editor: Editor, target: LgTarget, latex: string): PenStep[] {
   ];
 }
 
+// draw_line's plain line: straight between the two items' nearest edges, with no arrowhead, and
+// dashed when asked. Everything else about it is an arrow's.
+type ArrowStyle = { line?: boolean; dashed?: boolean };
+
+const common = (a: LgBounds, b: LgBounds) => Box.Common([Box.From(a), Box.From(b)]).toJson();
+
 // The arrow grows along its final curve, then its label is written at the curve's middle.
-function arrowSteps(editor: Editor, from: LgTarget, to: LgTarget, label: string): PenStep[] {
+function arrowSteps(editor: Editor, from: LgTarget, to: LgTarget, label: string, style: ArrowStyle = {}): PenStep[] {
   const id = createShapeId();
-  const { start, end, bend } = arrowEnds(from.bounds, to.bounds);
+  const { start, end, bend } = style.line ? { ...lineEnds(from.whole, to.whole), bend: 0 } : arrowEnds(from.bounds, to.bounds);
   const middle = arcAt(start, end, bend, 0.5).point;
+  const look = style.line ? { arrowheadEnd: "none" as const, dash: style.dashed ? ("dashed" as const) : ("draw" as const) } : {};
   const steps: PenStep[] = [
-    revealTarget(editor, from),
+    // A line shows both ends, since it's about how the two go together.
+    style.line
+      ? revealStep(editor, () => common(from.whole, to.whole), () => common(from.focus, to.focus))
+      : revealTarget(editor, from),
     {
       at: () => start,
       hold: true,
@@ -528,7 +559,7 @@ function arrowSteps(editor: Editor, from: LgTarget, to: LgTarget, label: string)
           x: 0,
           y: 0,
           meta: tutorMeta(),
-          props: { color: tutorColor(), start, end: first.point, bend: first.bend, richText: toRichText("") },
+          props: { color: tutorColor(), start, end: first.point, bend: first.bend, richText: toRichText(""), ...look },
         });
       },
       frame: (t) => {
@@ -558,6 +589,78 @@ function arrowSteps(editor: Editor, from: LgTarget, to: LgTarget, label: string)
   }
   steps.push(penRestStep(() => ({ x: end.x - 34 / editor.getZoomLevel(), y: end.y + 18 / editor.getZoomLevel() })));
   return steps;
+}
+
+// mark_work: a check in green, a cross in red, or a question mark in the tutor's colour.
+const MARK_COLORS: Record<MarkVerdict, TutorColor | undefined> = { correct: "green", incorrect: "red", check_again: undefined };
+
+// The student's own writing on a target: their marks whose centre is in a problem's working area
+// or a question's answer box. A problem's working area runs across the page, so for problems side
+// by side only the writing that belongs to this one counts. Null when there's none.
+function studentWorkBounds(editor: Editor, document: LgDocument | null, target: LgTarget): LgBounds | null {
+  const area = Box.From(target.work).expandBy(target.kind === "question" ? 24 : 0);
+  const boxes = editor
+    .getCurrentPageShapes()
+    .filter(isStudentMark)
+    .flatMap((shape) => editor.getShapePageBounds(shape) ?? [])
+    .filter(
+      (box) =>
+        area.containsPoint(box.center) && (target.kind !== "region" || regionAt(document, box.center)?.region_id === target.id),
+    );
+  return boxes.length ? Box.Common(boxes).toJson() : null;
+}
+
+// A check, a cross or a question mark beside the work: right of what the student wrote on a
+// problem or in a question's answer box, or of the problem or the box when they wrote nothing
+// there yet, and right of a circled spot's loop. Placed when it starts, so it sees the work then.
+function markSteps(editor: Editor, document: LgDocument | null, target: LgTarget, verdict: MarkVerdict): PenStep[] {
+  if (!isMarkVerdict(verdict)) {
+    console.warn(`[lg] mark_work doesn't know the verdict "${verdict}".`);
+    return [];
+  }
+  const kinds = MARK_STROKE_KINDS[verdict];
+  const seed = seedFor(target.id);
+  let box: LgBounds | null = null;
+  const place = () =>
+    (box ??= markBox(
+      target.kind === "selection"
+        ? target.bounds
+        : (studentWorkBounds(editor, document, target) ?? (target.kind === "question" ? target.work : target.bounds)),
+    ));
+  let strokes: ReturnType<typeof markStrokes> | null = null;
+  const placed = () => (strokes ??= markStrokes(verdict, place(), seed));
+  const color = MARK_COLORS[verdict];
+  return [
+    revealStep(
+      editor,
+      () => common(target.bounds, place()),
+      () => common(target.focus, Box.From(place()).expandBy(24).toJson()),
+    ),
+    ...kinds.map((kind, index) =>
+      inkStep(editor, "draw", () => placed()[index].points, {
+        duration: kind === "dot" ? 120 : 320,
+        color,
+        ...(kind === "dot" ? { fill: "fill" as const, size: "s" as const } : {}),
+        hold: index === 0,
+      }),
+    ),
+    penRestStep(() => {
+      const at = place();
+      return { x: at.x + at.w + 14 / editor.getZoomLevel(), y: at.y + at.h / 2 };
+    }),
+  ];
+}
+
+// Where an underline or a highlight goes: just the phrase, on each line it runs across, when the
+// target is a problem read with its lines. Otherwise, or when the lines don't hold the phrase, the
+// whole target, as before lines were read.
+function phraseSpots(document: LgDocument | null, target: LgTarget, text?: string): LgBounds[] {
+  const phrase = text?.trim();
+  if (!phrase) return [target.bounds];
+  const item = target.kind === "region" ? findRegion(document, target.id) : undefined;
+  const spots = document && item ? phraseBounds(document, item, phrase) : [];
+  if (!spots.length) console.info(`[lg] "${phrase}" isn't on a line of ${target.id}, so all of it is marked.`);
+  return spots.length ? spots : [target.bounds];
 }
 
 // A number line beside a target: the axis is drawn left to right with its ticks, the numbers
@@ -830,7 +933,7 @@ function clearSteps(editor: Editor): PenStep[] {
   ];
 }
 
-function targetSteps(editor: Editor, target: LgTarget, action: LgAction): PenStep[] | null {
+function targetSteps(editor: Editor, document: LgDocument | null, target: LgTarget, action: LgAction): PenStep[] | null {
   const rest = penRestStep(besideTarget(editor, target));
   switch (action.type) {
     case "focus_region":
@@ -842,14 +945,29 @@ function targetSteps(editor: Editor, target: LgTarget, action: LgAction): PenSte
       return [revealTarget(editor, target), inkStep(editor, "draw", () => points, { duration: 560 }), rest];
     }
     case "underline_region": {
-      const points = underlinePoints(target.bounds, seedFor(target.id));
-      return [revealTarget(editor, target), inkStep(editor, "draw", () => points, { duration: 340 }), rest];
+      const strokes = phraseSpots(document, target, action.text).map((spot) => underlinePoints(spot, seedFor(target.id)));
+      return [
+        revealTarget(editor, target),
+        ...strokes.map((points, index) =>
+          inkStep(editor, "draw", () => points, { duration: clamp(pathLength(points) * 0.6, 200, 340), hold: index === 0 }),
+        ),
+        rest,
+      ];
     }
     case "highlight_region": {
-      const points = highlightPoints(target.bounds, seedFor(target.id), HIGHLIGHT_WIDTH);
-      const duration = clamp(pathLength(points) * 0.8, 380, 1300);
-      return [revealTarget(editor, target), inkStep(editor, "highlight", () => points, { duration }), rest];
+      const strokes = phraseSpots(document, target, action.text).map((spot) =>
+        highlightPoints(spot, seedFor(target.id), HIGHLIGHT_WIDTH),
+      );
+      return [
+        revealTarget(editor, target),
+        ...strokes.map((points, index) =>
+          inkStep(editor, "highlight", () => points, { duration: clamp(pathLength(points) * 0.8, 260, 1300), hold: index === 0 }),
+        ),
+        rest,
+      ];
     }
+    case "mark_work":
+      return markSteps(editor, document, target, action.verdict);
     case "write_text":
       return noteSteps(editor, target, action.text, "draw");
     case "write_math":
@@ -874,13 +992,15 @@ function planLgAction(editor: Editor, document: LgDocument | null, action: LgAct
     }
     return action.type === "plot_graph" ? graphSteps(editor, target, action) : shapeSteps(editor, target, action);
   }
-  if (action.type === "draw_arrow") {
+  if (action.type === "draw_arrow" || action.type === "draw_line") {
     const from = resolveTarget(document, action.from_region_id);
     const to = resolveTarget(document, action.to_region_id);
-    return from && to ? arrowSteps(editor, from, to, action.label ?? "") : null;
+    if (!from || !to) return null;
+    const style = action.type === "draw_line" ? { line: true, dashed: !!action.dashed } : {};
+    return arrowSteps(editor, from, to, action.label ?? "", style);
   }
   const target = resolveTarget(document, "region_id" in action ? action.region_id : action.near_region_id);
-  return target ? targetSteps(editor, target, action) : null;
+  return target ? targetSteps(editor, document, target, action) : null;
 }
 
 export function applyLgAction(action: LgAction) {

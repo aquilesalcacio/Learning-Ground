@@ -62,7 +62,12 @@ export type LgRegion = {
   // [ymin, xmin, ymax, xmax] on a 0-1000 scale of the page as displayed. Only lg-regions.ts converts it.
   box_2d: [number, number, number, number];
   text: string;
+  // Each printed line of the problem with its own box, so the tutor can mark an exact phrase.
+  // Homework read before lines were read has none, and its marks cover the whole problem.
+  lines?: LgRegionLine[];
 };
+
+export type LgRegionLine = { text: string; box_2d: [number, number, number, number] };
 
 // A chat's homework: one or more files. Pages are numbered across all of them, so region IDs
 // such as p3.q1 stay unique. filename lists every file's name, for the tutor and the chat title.

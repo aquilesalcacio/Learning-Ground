@@ -76,7 +76,7 @@ Never commit these files. A tutor session starts from a one-time credential the 
 
 The tutor never drops a finished shape on the board. `applyLgAction` turns each action into steps for the tutor's pen (`web/lib/lg-tutor-pen.ts`), and the pen draws them by hand, one at a time, while the tutor talks. A cursor in the tutor's colours shows where the pen is (`web/components/tutor-cursor.tsx`, mounted as tldraw's `InFrontOfTheCanvas`).
 
-- **Geometry** is in `web/lib/lg-ink.ts`: hand-drawn loops, underlines, highlighter passes, arrow arcs, number lines, the answer box, graph axes and the shapes for `draw_shape`. Graphs are in `web/lib/lg-plot.ts`. Neither has tldraw imports, so `node --test lib/lg-ink.test.ts lib/lg-plot.test.ts` runs them.
+- **Geometry** is in `web/lib/lg-ink.ts`: hand-drawn loops, underlines, highlighter passes, arrow arcs, plain lines, number lines, the answer box, graph axes, the shapes for `draw_shape` and the check marks for `mark_work`. Graphs are in `web/lib/lg-plot.ts`. Neither has tldraw imports, so `node --test lib/lg-ink.test.ts lib/lg-plot.test.ts` runs them.
 - **Timing:** in a voice call, a mark waits up to 700 ms for the tutor to start speaking, so ink and voice begin together. When the student interrupts, the rest of the queue plays three times faster. A text chat never waits.
 - **The student comes first:** while the student's pen is down (any tool but select and hand), the tutor's pen waits.
 - **Undo:** tutor marks are made outside tldraw's undo history, so the student's undo only ever removes their own work. Before this change, undo could remove a tutor mark.
@@ -88,9 +88,11 @@ The tutor never drops a finished shape on the board. `applyLgAction` turns each 
 | `focus_region` | `region_id` | The board glides there and the pen flies along |
 | `point_at` | `region_id` | The pen taps with a ripple, leaving no ink |
 | `circle_region` | `region_id` | A hand-drawn loop |
-| `underline_region` | `region_id` | A slightly bowed underline |
-| `highlight_region` | `region_id` | A highlighter swipe, back and forth down a tall problem |
+| `underline_region` | `region_id`, `text?` | A slightly bowed underline: under just that phrase when `text` is given (below), else under the whole problem |
+| `highlight_region` | `region_id`, `text?` | A highlighter swipe over just that phrase, or back and forth down a tall problem |
 | `draw_arrow` | `from_region_id`, `to_region_id`, `label?` | The arrow grows along its curve, then its label is written |
+| `draw_line` | `from_region_id`, `to_region_id`, `label?`, `dashed?` | A straight line with no arrowhead grows between the two items' nearest edges, dashed when asked, then its label is written. A question counts with its answer box |
+| `mark_work` | `region_id`, `verdict` (`correct`, `incorrect` or `check_again`) | A green check, a red cross or a question mark in the tutor's colour, drawn by hand just right of the student's writing on that problem or in that answer box, or right of a circled spot |
 | `write_text` | `near_region_id`, `text` | Handwriting in the margin, letter by letter |
 | `write_math` | `near_region_id`, `latex` | KaTeX in the tutor's colour, revealed left to right (`web/components/lg-math-shape.tsx`) |
 | `number_line` | `near_region_id`, `min`, `max`, `marks?` | The axis and ticks drawn left to right, then the numbers, then a dot for each mark |
@@ -108,6 +110,10 @@ Every ID above can also be the ID of a question the tutor wrote (`q1`) or of a s
 - **Functions** are read by a tokenizer and a precedence parser in `lg-plot.ts`, never with `eval` or `Function`. They take numbers, `x`, `+ - * / ^`, brackets, implicit multiplication (`2x`, `3(x+1)`, `x(x-1)`), `sin cos tan sqrt abs ln log exp`, `pi`, `e` (so `2e` is 2·e, and `1e3` is an error) and an optional `y=` or `f(x)=`. Anything else is logged, and nothing is drawn.
 - **Curves** are sampled 200 times and break where the function isn't defined or jumps, so `1/x` and `tan x` have no line through their asymptotes. With no `y_min` and `y_max`, the y range fits the curves and points, leaving out an asymptote's tails. Curves 2 and 3 use the tutor's other colours, never black, which is the student's pen. Ticks are numbered every 1, 2, 5 or 10 steps, as far apart as the widest number needs, each in a box as wide as its text, and an axis on the top or right edge has its numbers outside the plot.
 - **Shapes** label sides in order: a rectangle or square's bottom, then right; a right triangle's upright leg, bottom leg, then long side; a triangle's base, then the other sides, with `h=` drawing its height dashed. A circle takes `r=` or `d=`. A label for the whole shape (`A=`, `P=`, `area=` or `perimeter=`, with a capital A or P), and any past the last side, goes under it. Two numbers set a rectangle's or triangle's proportions. Fraction models have 1 to 12 `parts`, and the first `shaded` ones are filled.
+
+### Exact phrases
+
+`/documents/read-page` returns each problem's printed lines with their own boxes (`lines`, at most 12 per problem). `pageRegions` keeps the valid ones on the region as `lines`, within the same text budgets as the region's own text, each line whole or not at all so its text always matches its box. With `text`, `underline_region` and `highlight_region` mark just those words: `phraseBoxes` in `lg-regions.ts` finds the line, or lines, holding the phrase, comparing letters, digits and math symbols without spaces, case or accents (so `1/2` never finds `12`), and forgiving about one character in five on a longer phrase. It estimates where the words fall from their place among the line's characters. When the region has no lines (a question, a circled spot, or homework read before lines were), or the phrase isn't found, the whole region is marked, as before. `node --test lib/lg-regions.test.ts` runs it.
 
 ### What to practice
 
@@ -161,7 +167,7 @@ Students can move and remove files on the board:
 
 1. `web/lib/lg-document.ts` checks the file by its bytes: PDF, PNG, JPG or WEBP, up to 20 MB and 10 pages. It renders each page to an image of about 2000 px on the long side, with pdf.js for PDFs (loaded only in the browser, with its worker bundled by `new Worker(new URL(...), import.meta.url)`) and with a photo's EXIF rotation applied.
 2. Each page image is stored with `editor.getAssetForExternalContent`, so it's saved in the chat board's IndexedDB under its `persistenceKey`, and placed as a locked page image. The pages are usable at once, with one whole-page region each.
-3. The pages are read one at a time with `POST /documents/read-page`, and the chat's regions are replaced page by page. A page that fails keeps its whole-page region, and the dialog offers **Read again**. Readings are cached in localStorage by file hash, page and language, so uploading the same file again makes no API call.
+3. The pages are read one at a time with `POST /documents/read-page`, and the chat's regions are replaced page by page. A page that fails keeps its whole-page region, and the dialog offers **Read again**. Readings are cached in localStorage (`lg-read-cache-v2`) by file hash, page and language, so uploading the same file again makes no API call. Version 2 added the lines, and the version 1 cache is removed on first use.
 
 The chat's document, saved with the chat in localStorage:
 
@@ -171,7 +177,7 @@ The chat's document, saved with the chat in localStorage:
 | `files[]` | `{ id, filename, hash, page_count }` for each file. Missing on homework saved before several files were allowed, where `documentFiles()` in `lg-regions.ts` treats it as one file |
 | `status` | `reading` while pages are being read, else `ready` |
 | `pages[]` | `{ number, w, h, read, x, y, file, source }`: each page's size in board units (portrait and landscape both work), whether it was read (`pending`, `done` or `failed`), where it sits on the board, which file it came from, and its page number inside that file, which keys the reading cache. Pages saved before files could move have no `x`, `y`, `file` or `source`, and stack down from the top |
-| `regions[]` | `{ region_id, label, page, box_2d, text }`. `box_2d` is `[ymin, xmin, ymax, xmax]` on a 0–1000 scale of the page |
+| `regions[]` | `{ region_id, label, page, box_2d, text, lines? }`. `box_2d` is `[ymin, xmin, ymax, xmax]` on a 0–1000 scale of the page. `lines` is `[{ text, box_2d }]`, each printed line of the problem; homework read before lines were has none |
 
 If a reopened board has the document but not its page images, for example after site data was cleared, the document is dropped and a system line in the chat asks the student to upload the file again.
 
@@ -183,7 +189,7 @@ The image endpoints take multipart form data. All answer errors as `{ "detail": 
 |---|---|---|
 | `POST /check-work` | `image` (PNG snapshot), `label`, `language` (optional: `pt`, `es` or `en`) | `{ status, student_wrote, analysis, hint }` |
 | `POST /voice/session` | JSON `{ "text_only": bool }` | `{ conversation_token, signed_url }`: a token for a voice call (WebRTC) or a signed URL for a text chat (WebSocket); the other is null. 503 when the API has no ElevenLabs key or agent ID, 502 when ElevenLabs refuses |
-| `POST /documents/read-page` | `image` (PNG, JPEG or WEBP, up to 10 MB), `language` (`pt`, `es` or `en`), `page` (1 to 999) | `{ page, page_text, problems: [{ label, box_2d, text }] }`. `problems` may be empty |
+| `POST /documents/read-page` | `image` (PNG, JPEG or WEBP, up to 10 MB), `language` (`pt`, `es` or `en`), `page` (1 to 999) | `{ page, page_text, problems: [{ label, box_2d, text, lines: [{ text, box_2d }] }] }`. `problems` and `lines` may be empty. Lines come from the same Gemini call, at most 12 per problem of up to 160 characters, each on its problem; a longer line is dropped, not cut |
 
 `read-page` errors are 413 (too large), 415 (wrong type), 400 (corrupt image) and 502 (Gemini busy or failed, with a message safe to show the student). A page takes about 15 s and up to about 60 s, so the web app waits up to 90 s.
 

@@ -54,3 +54,50 @@ test("cached readings are capped and sanitized", () => {
   assert.deepEqual(reading.problems[0].box_2d, [10, 20, 30, 40]);
   assert.deepEqual(compactReading({ page: 1, page_text: "", problems: null as unknown as [] }).problems, []);
 });
+
+test("cached readings keep each problem's lines, capped and sanitized", () => {
+  const reading = compactReading({
+    page: 1,
+    page_text: "",
+    problems: [
+      {
+        label: "1",
+        box_2d: [100, 0, 200, 1000],
+        text: "Ana has 12 apples.",
+        lines: [
+          { text: "Ana has 12 apples.", box_2d: ["100", 0, 140, 1000] as unknown as number[] },
+          // Too long to keep whole, so skipped.
+          { text: "q".repeat(400), box_2d: [150, 0, 190, 1000] },
+          ...Array.from({ length: 20 }, () => ({ text: "w".repeat(150), box_2d: [150, 0, 190, 1000] })),
+        ],
+      },
+      { label: "2", box_2d: [300, 0, 400, 1000], text: "", lines: "nope" as unknown as [] },
+      { label: "3", box_2d: [500, 0, 600, 1000], text: "" },
+    ],
+  });
+  const [first, second, third] = reading.problems;
+  assert.deepEqual(first.lines?.[0], { text: "Ana has 12 apples.", box_2d: [100, 0, 140, 1000] });
+  assert.ok((first.lines?.length ?? 0) <= 12);
+  assert.ok(first.lines?.every((line) => line.text.length <= 160 && !line.text.endsWith("…")));
+  assert.equal(first.lines?.[1]?.text, "w".repeat(150));
+  // A problem's lines share its 600-character budget, as its region's do.
+  assert.ok((first.lines ?? []).reduce((sum, line) => sum + line.text.length, 0) <= 600);
+  // No lines, or lines that aren't a list, leave the problem as it was before lines were read.
+  assert.equal("lines" in second, false);
+  assert.equal("lines" in third, false);
+});
+
+test("cached readings share one line budget across the page", () => {
+  const reading = compactReading({
+    page: 1,
+    page_text: "",
+    problems: Array.from({ length: 20 }, (_, index) => ({
+      label: String(index + 1),
+      box_2d: [index * 45, 0, index * 45 + 40, 1000],
+      text: "t",
+      lines: Array.from({ length: 6 }, () => ({ text: "w".repeat(150), box_2d: [index * 45, 0, index * 45 + 6, 1000] })),
+    })),
+  });
+  const total = reading.problems.reduce((sum, problem) => sum + (problem.lines ?? []).reduce((lineSum, line) => lineSum + line.text.length, 0), 0);
+  assert.ok(total <= 4000, `lines hold ${total} characters`);
+});

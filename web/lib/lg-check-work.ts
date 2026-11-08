@@ -3,6 +3,7 @@
 import { LgApiAuthError, lgApiFetch } from "./lg-api";
 import { captureLgRegion } from "./lg-board-link";
 import { apiErrorMessage } from "./lg-document";
+import { markVerdictFor } from "./lg-ink";
 import { findRegion } from "./lg-regions";
 import { selectionLabel } from "./lg-selection";
 import { findBoardQuestion, findBoardSelection, getActiveDocument, getActiveTutor, readLgState, recordWorkCheck } from "./lg-store";
@@ -78,6 +79,7 @@ export async function checkStudentWork(region_id: string): Promise<WorkCheckOutc
 
 // The report the tutor receives. It answers the student in its own words.
 export function workReport({ region_id, label, check }: Extract<WorkCheckOutcome, { ok: true }>) {
+  const verdict = markVerdictFor(check.status);
   return [
     region_id
       ? `Student work on ${label} (${region_id}). Status: ${check.status}.`
@@ -85,5 +87,6 @@ export function workReport({ region_id, label, check }: Extract<WorkCheckOutcome
     `They wrote: ${check.student_wrote}`,
     `Analysis: ${check.analysis}`,
     `Suggested hint: ${check.hint}`,
+    ...(region_id && verdict ? [`Mark it: mark_work on ${region_id} with verdict ${verdict}.`] : []),
   ].join("\n");
 }

@@ -2,7 +2,7 @@
 // Node strips the types itself, so this needs no test framework.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { LgDocument } from "./lg-types";
+import type { LgDocument, LgRegion } from "./lg-types";
 
 // Node needs the extension and TypeScript rejects it in a static import, so it's loaded here.
 const regions = (await import(`./lg-regions${".ts"}`)) as typeof import("./lg-regions");
@@ -14,6 +14,8 @@ const {
   fileNames,
   findRegion,
   pageSource,
+  phraseBounds,
+  phraseBoxes,
   placeNewFile,
   pageRegions,
   problemLabel,
@@ -212,9 +214,167 @@ test("the region at a point: its printed box first, then the space under it, nev
   // Side by side, both working areas cross the page: the printed box decides.
   assert.equal(regionAt(document, { x: 700, y: 150 })?.region_id, "p1.q2");
   assert.equal(regionAt(document, { x: 100, y: 150 })?.region_id, "p1.q1");
+  // Under side-by-side problems, writing belongs to the one it's under, or the nearest beside it.
+  assert.equal(regionAt(document, { x: 700, y: 350 })?.region_id, "p1.q2");
+  assert.equal(regionAt(document, { x: 200, y: 350 })?.region_id, "p1.q1");
+  assert.equal(regionAt(document, { x: 980, y: 350 })?.region_id, "p1.q2");
   // Under problem 3, where the student works it.
   assert.equal(regionAt(document, { x: 500, y: 800 })?.region_id, "p1.q3");
   // The margin beside the page belongs to no problem.
   assert.equal(regionAt(document, { x: 1100, y: 550 }), undefined);
   assert.equal(regionAt(null, { x: 100, y: 150 }), undefined);
+});
+
+// Lines of a problem, for marking an exact phrase.
+
+const LINE_DOC = documentWith([{ w: 1000, h: 1000 }]);
+
+test("each problem keeps its valid line boxes, capped, and none when it has none", () => {
+  const built = pageRegions(1, [
+    {
+      label: "1",
+      box_2d: [100, 50, 220, 950],
+      text: "Ana has 12 apples. She gives away 5.",
+      lines: [
+        { text: "1. Ana has 12 apples.", box_2d: [100, 50, 140, 600] },
+        { text: "inverted", box_2d: [180, 50, 140, 600] },
+        { text: "nan", box_2d: [150, 50, Number.NaN, 600] },
+        { text: "   ", box_2d: [150, 50, 180, 600] },
+        { text: "She gives away 5.", box_2d: [150, 50, 190, 560] },
+      ],
+    },
+    { label: "2", box_2d: [300, 50, 400, 950], text: "Solve 2x = 8" },
+    {
+      label: "3",
+      box_2d: [500, 50, 900, 950],
+      text: "long",
+      lines: [
+        // Too long to keep whole, so skipped.
+        { text: "w".repeat(300), box_2d: [500, 50, 510, 950] },
+        ...Array.from({ length: 30 }, (_, index) => ({ text: "w".repeat(130), box_2d: [512 + index * 12, 50, 522 + index * 12, 950] })),
+      ],
+    },
+  ]);
+  assert.deepEqual(built[0].lines, [
+    { text: "1. Ana has 12 apples.", box_2d: [100, 50, 140, 600] },
+    { text: "She gives away 5.", box_2d: [150, 50, 190, 560] },
+  ]);
+  assert.equal("lines" in built[1], false);
+  const lines = built[2].lines ?? [];
+  assert.ok(lines.length > 0 && lines.length <= 12);
+  // Each line is kept whole, never cut, so its text still matches its box.
+  assert.ok(lines.every((line) => line.text === "w".repeat(130)));
+  assert.equal(lines[0].box_2d[0], 512);
+  // A region's lines share the region's own text budget, so storage stays small.
+  assert.ok(lines.reduce((sum, line) => sum + line.text.length, 0) <= 600);
+});
+
+test("a page's lines share one text budget", () => {
+  const built = pageRegions(
+    1,
+    Array.from({ length: 20 }, (_, index) => ({
+      label: String(index + 1),
+      box_2d: [index * 45, 0, index * 45 + 40, 1000],
+      text: "t",
+      lines: Array.from({ length: 6 }, (_, line) => ({ text: "w".repeat(150), box_2d: [index * 45 + line * 6, 0, index * 45 + line * 6 + 6, 1000] })),
+    })),
+  );
+  const total = built.reduce((sum, item) => sum + (item.lines ?? []).reduce((lineSum, line) => lineSum + line.text.length, 0), 0);
+  assert.ok(total <= 4000 + 200, `lines hold ${total} characters`);
+});
+
+const wordProblem = {
+  region_id: "p1.q1",
+  label: "Problem 1",
+  page: 1,
+  box_2d: [100, 100, 200, 900] as [number, number, number, number],
+  text: "A train travels 120 km in 2 hours. What is its average speed?",
+  lines: [
+    { text: "1. A train travels 120 km in 2 hours.", box_2d: [100, 100, 140, 800] as [number, number, number, number] },
+    { text: "What is its average speed?", box_2d: [150, 100, 190, 700] as [number, number, number, number] },
+  ],
+};
+
+test("a phrase gets the part of its line where it falls", () => {
+  const [box, ...rest] = phraseBoxes(wordProblem, "120 km");
+  assert.equal(rest.length, 0);
+  const [ymin, xmin, ymax, xmax] = box;
+  assert.deepEqual([ymin, ymax], [100, 140]);
+  // "120 km" sits a little before the middle of the first line, which runs from 100 to 800.
+  assert.ok(xmin > 300 && xmin < 500, `starts at ${xmin}`);
+  assert.ok(xmax > xmin + 60 && xmax < 620, `ends at ${xmax}`);
+  // The second line's phrase stays on the second line, inside its box.
+  const [speed] = phraseBoxes(wordProblem, "average speed");
+  assert.deepEqual([speed[0], speed[2]], [150, 190]);
+  assert.ok(speed[1] > 300 && speed[3] <= 700);
+});
+
+test("matching ignores case, accents and spacing, and forgives a small slip", () => {
+  const equation = {
+    lines: [{ text: "Resuelve: 2x + 6 = 14 en la región", box_2d: [100, 0, 140, 1000] as [number, number, number, number] }],
+  };
+  assert.equal(phraseBoxes(equation, "2x+6=14").length, 1);
+  assert.equal(phraseBoxes(equation, "REGION").length, 1);
+  assert.equal(phraseBoxes(wordProblem, "120km").length, 1);
+  // One letter off in a longer phrase still matches.
+  assert.equal(phraseBoxes(wordProblem, "avrage speed").length, 1);
+  // A phrase that isn't there doesn't match anything nearby.
+  assert.deepEqual(phraseBoxes(wordProblem, "the bus leaves at noon"), []);
+  assert.deepEqual(phraseBoxes(wordProblem, "  "), []);
+});
+
+test("a short phrase prefers a whole number or word to part of a longer one", () => {
+  const item = { lines: [{ text: "Ana has 15 apples and gives 5 away.", box_2d: [100, 0, 140, 1000] as [number, number, number, number] }] };
+  const [[, xmin]] = phraseBoxes(item, "5");
+  // The 5 she gives away, past the middle of the line, not the 5 in 15.
+  assert.ok(xmin > 600, `starts at ${xmin}`);
+  // With no whole match, part of a word still counts.
+  assert.equal(phraseBoxes({ lines: [{ text: "Solve 2x + 6", box_2d: [100, 0, 140, 1000] }] }, "x").length, 1);
+});
+
+test("a phrase across a line break marks the end of one line and the start of the next", () => {
+  const boxes = phraseBoxes(wordProblem, "2 hours. What is");
+  assert.equal(boxes.length, 2);
+  assert.deepEqual([boxes[0][0], boxes[1][0]], [100, 150]);
+  // It runs to the end of the first line, and starts at the start of the second.
+  assert.ok(boxes[0][3] >= 780);
+  assert.ok(boxes[1][1] <= 110);
+});
+
+test("no lines, or no match, falls back to the whole region", () => {
+  const old: LgRegion = { region_id: "p1.q2", label: "Problem 2", page: 1, box_2d: [300, 50, 400, 950], text: "Solve 2x = 8" };
+  assert.deepEqual(phraseBoxes(old, "2x = 8"), []);
+  const document = { ...LINE_DOC, regions: [wordProblem, old] };
+  assert.deepEqual(phraseBounds(document, old, "2x = 8"), []);
+  const [bounds] = phraseBounds(document, wordProblem, "120 km");
+  // Board units on a 1000 x 1000 page are the same numbers.
+  assert.equal(bounds.y, 100);
+  assert.equal(bounds.h, 40);
+  assert.ok(bounds.x > 300 && bounds.w > 60);
+});
+
+test("math symbols tell numbers and expressions apart", () => {
+  const box = [100, 0, 140, 1000] as [number, number, number, number];
+  const span = (text: string, phrase: string) => {
+    const [found] = phraseBoxes({ lines: [{ text, box_2d: box }] }, phrase);
+    return found ? [found[1], found[3]] : null;
+  };
+  // "1/2" is the fraction near the end, not the 12 apples.
+  const [half] = span("Ana has 12 apples and eats 1/2 of them.", "1/2") ?? [0];
+  assert.ok(half > 550, `1/2 starts at ${half}`);
+  const [twelve] = span("Ana has 12 apples and eats 1/2 of them.", "12") ?? [0];
+  assert.ok(twelve < 350, `12 starts at ${twelve}`);
+  // "2.5" is the dimes, not the 25 cents.
+  const [dimes] = span("It costs 25 cents, or 2.5 dimes.", "2.5") ?? [0];
+  assert.ok(dimes > 550, `2.5 starts at ${dimes}`);
+  // "x - 3" is the second equation, not "x = 3".
+  const [minus] = span("x = 3 and x - 3 = 0", "x - 3") ?? [0];
+  assert.ok(minus > 450, `x - 3 starts at ${minus}`);
+  assert.equal(span("x = 3 and x + 1 = 4", "x - 3"), null);
+  // Look-alike symbols count as the plain ones, and a sentence's last full stop doesn't matter.
+  assert.notEqual(span("Solve 7 \u2212 x = 2", "7 - x = 2"), null);
+  assert.notEqual(span("She gives away 5 apples", "5 apples."), null);
+  // A number inside a decimal isn't a whole one: "5" finds the 5 on its own, not the one in 2.5.
+  const [five] = span("Add 2.5 and 5 together", "5") ?? [0];
+  assert.ok(five > 350, `5 starts at ${five}`);
 });

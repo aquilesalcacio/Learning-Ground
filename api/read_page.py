@@ -14,7 +14,7 @@ from collections import OrderedDict
 from google import genai
 from google.genai import types
 from PIL import Image, ImageOps, UnidentifiedImageError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from check_work import LANGUAGE_NAMES, Language
 from gemini import GeminiError, generate_json, make_client, with_fallback
@@ -45,14 +45,24 @@ MAX_PROBLEMS = 30
 MAX_PAGE_TEXT = 6000
 MAX_PROBLEM_TEXT = 600
 MAX_LABEL = 40
+# Each printed line of a problem, so the tutor can underline an exact phrase. The web app saves
+# them with every chat, and each one costs output time inside the 25 s per try, so they're capped.
+MAX_LINES = 12
+MAX_LINE_TEXT = 160
 
 CACHE_SIZE = 128
+
+
+class Line(BaseModel):
+    text: str
+    box_2d: list[int] = Field(min_length=4, max_length=4, description="[ymin, xmin, ymax, xmax], 0-1000")
 
 
 class Problem(BaseModel):
     label: str
     box_2d: list[int] = Field(min_length=4, max_length=4, description="[ymin, xmin, ymax, xmax], 0-1000")
     text: str
+    lines: list[Line] = Field(default_factory=list)
 
 
 class PageReading(BaseModel):
@@ -61,10 +71,25 @@ class PageReading(BaseModel):
     problems: list[Problem]
 
 
+class _GeminiLine(BaseModel):
+    text: str
+    box_2d: list[float]
+
+
+def _require_lines(schema: dict) -> None:
+    schema.setdefault("required", []).append("lines")
+
+
 class _GeminiProblem(BaseModel):
+    # Gemini may skip a field the schema doesn't require, so the schema it gets requires lines,
+    # even as an empty list. Parsing still accepts a reply without them; the problem's marks
+    # then cover all of it.
+    model_config = ConfigDict(json_schema_extra=_require_lines)
+
     label: str
     box_2d: list[float]
     text: str
+    lines: list[_GeminiLine] = Field(default_factory=list)
 
 
 class _GeminiPage(BaseModel):
@@ -84,7 +109,7 @@ class BadImageError(ValueError):
         self.status = status
 
 
-SYSTEM_PROMPT = """You transcribe one page of a student's homework for a tutoring app. You receive one image of the page.
+SYSTEM_PROMPT = f"""You transcribe one page of a student's homework for a tutoring app. You receive one image of the page.
 
 Return:
 - page_text: everything printed or written on the page, in reading order, transcribed exactly in the page's own language. Keep line breaks between problems.
@@ -92,6 +117,9 @@ Return:
   - label: the problem's own number or name as printed, such as "1", "3b" or "Problem 4". If it has none, number it by its position on the page.
   - box_2d: [ymin, xmin, ymax, xmax] around that problem's printed content: its number, statement, any figure, and its sub-parts. Leave out the space left for the answer and anything the student wrote there. Coordinates are normalized to 0-1000 of the page, with 0,0 at the top left.
   - text: that problem's statement, transcribed exactly.
+  - lines: each printed line of that problem, top to bottom. At most {MAX_LINES}.
+    - text: everything printed on that line, transcribed exactly, including the problem's number on its first line.
+    - box_2d: [ymin, xmin, ymax, xmax] tight around just that line's printed text, on the same 0-1000 scale.
 
 Write math as plain text a person could read aloud: x^2 for powers, sqrt(x) for roots, a/b for fractions, and no LaTeX. Don't solve anything, correct anything, or add commentary. Headings, names, dates and instructions that apply to the whole page go in page_text only, not in problems. If the page has no exercises, return an empty problems list.
 
@@ -190,6 +218,23 @@ def iou(a: list[int], b: list[int]) -> float:
     return overlap / (area_a + area_b - overlap)
 
 
+def clean_lines(raw: list[_GeminiLine], problem_box: list[int]) -> list[Line]:
+    """Keeps a problem's usable lines: valid boxes on the problem, some text, capped."""
+    kept: list[Line] = []
+    for item in raw:
+        box = clean_box(item.box_2d)
+        # Uncut: a line too long is dropped rather than cut, since the app places a phrase by where
+        # it falls in the line's text across the line's whole box.
+        text = clean_text(item.text, len(item.text))
+        # A line off its problem belongs to another one, or isn't there at all.
+        if box is None or not text or len(text) > MAX_LINE_TEXT or iou(box, problem_box) == 0:
+            continue
+        kept.append(Line(text=text, box_2d=box))
+        if len(kept) == MAX_LINES:
+            break
+    return kept
+
+
 def clean_problems(raw: list[_GeminiProblem]) -> list[Problem]:
     """Keeps the usable problems: valid boxes, no duplicates, capped text."""
     kept: list[Problem] = []
@@ -204,7 +249,8 @@ def clean_problems(raw: list[_GeminiProblem]) -> list[Problem]:
         label = clean_text(item.label, MAX_LABEL) or str(len(kept) + 1)
         # Gemini often repeats the number at the start of the text, as in "1. Solve...".
         text = re.sub(rf"^\(?{re.escape(label)}[.):]\s+", "", item.text.strip())
-        kept.append(Problem(label=label, box_2d=box, text=clean_text(text, MAX_PROBLEM_TEXT)))
+        lines = clean_lines(item.lines, box)
+        kept.append(Problem(label=label, box_2d=box, text=clean_text(text, MAX_PROBLEM_TEXT), lines=lines))
         if len(kept) == MAX_PROBLEMS:
             break
     return kept

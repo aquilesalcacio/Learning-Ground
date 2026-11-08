@@ -52,6 +52,8 @@ const LOCKED_LINES = [
   "Don't stop to ask what they want.",
   "Never plot or label a homework's final answer",
   'A message starting "[Student circled] sN" comes from the app',
+  "After read_student_work, mark the result as its report says, with mark_work on the same ID",
+  "When the report says nothing about a mark, as for blank or unreadable work, don't mark it.",
 ];
 
 // Start of each line that is a heading, so text inside a block can't pass for one.
@@ -338,6 +340,27 @@ test("graphs and shapes are in the tool guide and the practice setup", () => {
   assert.match(practice, /name a topic instead, such as slope or the area of a triangle, that topic is the target: skip the lookup/);
   // The no-homework section names them among the tools a question's ID works with.
   assert.match(text, /number_line, plot_graph or draw_shape, and with read_student_work/);
+});
+
+test("lines, check marks and exact phrases are in the tool guide and the practice flow", () => {
+  const text = buildTutorPrompt(tutor, profile, homework);
+  const core = text.slice(text.lastIndexOf("# Core rules"));
+  assert.match(core, /^ {2}- Word problems: underline_region each fact that matters, with text set to its exact words/m);
+  assert.match(core, /^ {2}- The key phrase: highlight_region with text set to its exact words/m);
+  assert.match(core, /^ {2}- Matching two items, or showing they go together: draw_line/m);
+  assert.match(core, /^ {2}- After checking work: mark_work on the same ID/m);
+  // text is copied from the region's text, and falls back to the whole mark elsewhere.
+  assert.match(core, /^- The text for underline_region and highlight_region is copied word for word/m);
+  const setup = core.split("\n").find((line) => line.startsWith("- In the same reply, set it up on the question's ID"));
+  assert.ok(setup?.includes("draw_line to match or relate two items"), "the setup list is missing draw_line");
+  const solve = core.split("\n").find((line) => line.startsWith("- Solve it together"));
+  assert.match(solve ?? "", /read_student_work, then mark it with mark_work/);
+  // Every way a check reaches the tutor ends with a mark.
+  const lines = core.split("\n");
+  assert.match(lines.find((line) => line.includes('"[Check my work]"')) ?? "", /mark_work/);
+  assert.match(lines.find((line) => line.includes('"[Answer written]"')) ?? "", /mark_work/);
+  assert.match(lines.find((line) => line.includes('"[Student circled] sN"')) ?? "", /mark_work on sN/);
+  assert.match(buildTutorPrompt(tutor, profile, null), /read_student_work to check the student's answer, then mark_work to mark it/);
 });
 
 test("with no homework, the practice flow leads", () => {

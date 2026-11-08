@@ -73,7 +73,9 @@ export type LgRegionCapture = Blob | "no_board" | "unknown_region" | "no_work";
 const MAX_CAPTURE_BYTES = 4.5 * 1024 * 1024;
 const PIXEL_RATIOS = [2, 1.5, 1];
 
-const isStudentMark = (shape: TLShape) => !shape.meta.kind && shape.meta.author !== "tutor";
+// What the student put on the board themselves: not the tutor's marks, the pages, outlines,
+// questions or circled spots. Checks capture these, and mark_work goes beside them.
+export const isStudentMark = (shape: TLShape) => !shape.meta.kind && shape.meta.author !== "tutor";
 
 // Where a spot the student circled (s1) is now: its loop on the board, which moves with its file,
 // or where it was saved when the loop is gone. Null when there's no such spot.

@@ -67,7 +67,7 @@
     "tool_config": {
       "type": "client",
       "name": "underline_region",
-      "description": "Underline a problem by hand. Good for the facts that matter in a word problem.",
+      "description": "Underline by hand: with text, just those words of a problem; without it, the whole problem. Good for the facts that matter in a word problem, such as each number and its unit.",
       "expects_response": false,
       "parameters": {
         "type": "object",
@@ -75,6 +75,10 @@
           "region_id": {
             "type": "string",
             "description": "ID of a homework region exactly as listed, such as p1.q3, of a question you wrote, such as q1, or of a spot the student circled, such as s1."
+          },
+          "text": {
+            "type": "string",
+            "description": "Optional words to underline, copied exactly from the problem's text as listed, a few words at most, such as \"120 km\". Leave it out to underline the whole problem."
           }
         },
         "required": [
@@ -88,7 +92,7 @@
     "tool_config": {
       "type": "client",
       "name": "highlight_region",
-      "description": "Highlight a problem with a marker. Good for the part the student should focus on.",
+      "description": "Highlight with a marker: with text, just that phrase of a problem; without it, the whole problem. Good for the key phrase the student should focus on.",
       "expects_response": false,
       "parameters": {
         "type": "object",
@@ -96,6 +100,10 @@
           "region_id": {
             "type": "string",
             "description": "ID of a homework region exactly as listed, such as p1.q3, of a question you wrote, such as q1, or of a spot the student circled, such as s1."
+          },
+          "text": {
+            "type": "string",
+            "description": "Optional phrase to highlight, copied exactly from the problem's text as listed, a few words at most, such as \"average speed\". Leave it out to highlight the whole problem."
           }
         },
         "required": [
@@ -130,6 +138,71 @@
         "required": [
           "from_region_id",
           "to_region_id"
+        ]
+      }
+    }
+  },
+  {
+    "enabled": true,
+    "tool_config": {
+      "type": "client",
+      "name": "draw_line",
+      "description": "Draw a plain line by hand between two problems, questions or circled spots, with no arrowhead, to match them or show they go together. Use draw_arrow instead when one leads to the other.",
+      "expects_response": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "from_region_id": {
+            "type": "string",
+            "description": "ID the line starts at: a region such as p1.q3, a question such as q1, or a spot the student circled, such as s1."
+          },
+          "to_region_id": {
+            "type": "string",
+            "description": "ID the line ends at."
+          },
+          "label": {
+            "type": "string",
+            "description": "Optional short label for the line, a few words at most."
+          },
+          "dashed": {
+            "type": "boolean",
+            "description": "Optional. True for a dashed line, such as for a link to check."
+          }
+        },
+        "required": [
+          "from_region_id",
+          "to_region_id"
+        ]
+      }
+    }
+  },
+  {
+    "enabled": true,
+    "tool_config": {
+      "type": "client",
+      "name": "mark_work",
+      "description": "Mark the student's work by hand, beside it: a check when it's right, a cross when there's a mistake, a question mark when it's unfinished or unclear. Use it right after read_student_work, on the same ID.",
+      "expects_response": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "region_id": {
+            "type": "string",
+            "description": "ID of a homework region exactly as listed, such as p1.q3, of a question you wrote, such as q1, or of a spot the student circled, such as s1."
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "correct",
+              "incorrect",
+              "check_again"
+            ],
+            "description": "correct for a check, incorrect for a cross, check_again for a question mark."
+          }
+        },
+        "required": [
+          "region_id",
+          "verdict"
         ]
       }
     }

@@ -13,7 +13,7 @@ import { applyLgAction, askLgQuestion, doneLookingAtLgWork, type LgAction, lookA
 import { LgApiAuthError, lgApiFetch } from "./lg-api";
 import { checkStudentWork, type WorkCheck, type WorkCheckOutcome, workReport } from "./lg-check-work";
 import { apiErrorMessage } from "./lg-document";
-import { parseNumber, parseNumberLineMarks, type ShapeKind } from "./lg-ink";
+import { type MarkVerdict, markVerdictFor, parseNumber, parseNumberLineMarks, type ShapeKind } from "./lg-ink";
 import { runStudentProgress } from "./lg-progress-run";
 import { findRegion } from "./lg-regions";
 import {
@@ -77,8 +77,11 @@ const clientTools: ClientTools = {
   focus_region: (p) => act("focus_region", p, { type: "focus_region", region_id: text(p.region_id) }),
   point_at: (p) => act("point_at", p, { type: "point_at", region_id: text(p.region_id) }),
   circle_region: (p) => act("circle_region", p, { type: "circle_region", region_id: text(p.region_id) }),
-  underline_region: (p) => act("underline_region", p, { type: "underline_region", region_id: text(p.region_id) }),
-  highlight_region: (p) => act("highlight_region", p, { type: "highlight_region", region_id: text(p.region_id) }),
+  // With text, just that phrase of the problem; without it, or when the phrase isn't found, all of it.
+  underline_region: (p) =>
+    act("underline_region", p, { type: "underline_region", region_id: text(p.region_id), text: optionalText(p.text) }),
+  highlight_region: (p) =>
+    act("highlight_region", p, { type: "highlight_region", region_id: text(p.region_id), text: optionalText(p.text) }),
   draw_arrow: (p) =>
     act("draw_arrow", p, {
       type: "draw_arrow",
@@ -86,6 +89,18 @@ const clientTools: ClientTools = {
       to_region_id: text(p.to_region_id),
       label: p.label ? text(p.label) : undefined,
     }),
+  draw_line: (p) =>
+    act("draw_line", p, {
+      type: "draw_line",
+      from_region_id: text(p.from_region_id),
+      to_region_id: text(p.to_region_id),
+      label: optionalText(p.label),
+      // A boolean, though a model may send it as text.
+      dashed: p.dashed === true || p.dashed === "true",
+    }),
+  // An unknown verdict draws nothing, and says so in the console.
+  mark_work: (p) =>
+    act("mark_work", p, { type: "mark_work", region_id: text(p.region_id), verdict: text(p.verdict) as MarkVerdict }),
   write_text: (p) => act("write_text", p, { type: "write_text", near_region_id: text(p.near_region_id), text: text(p.text) }),
   write_math: (p) => act("write_math", p, { type: "write_math", near_region_id: text(p.near_region_id), latex: text(p.latex) }),
   number_line: (p) =>
@@ -367,7 +382,8 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
     return true;
   }
 
-  // Check my work. With a session, the tutor responds; without one, the hint goes on the board.
+  // Check my work. With a session, the tutor responds; without one, the work gets its mark and
+  // the hint goes on the board.
   async function checkWork(region_id: string) {
     if (checking) return;
     setChecking(true);
@@ -380,9 +396,13 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
     onLine("system", `Checked ${outcome.label}: ${CHECK_STATUS_LABEL[outcome.check.status]}.`);
     if (connected) {
       conversation.sendUserMessage(`[Check my work]\n${workReport(outcome)}`);
-    } else if (outcome.check.hint) {
-      onLine("system", outcome.check.hint);
-      applyLgAction({ type: "write_text", near_region_id: region_id, text: outcome.check.hint });
+    } else {
+      const verdict = markVerdictFor(outcome.check.status);
+      if (outcome.region_id && verdict) applyLgAction({ type: "mark_work", region_id: outcome.region_id, verdict });
+      if (outcome.check.hint) {
+        onLine("system", outcome.check.hint);
+        applyLgAction({ type: "write_text", near_region_id: region_id, text: outcome.check.hint });
+      }
     }
   }
 

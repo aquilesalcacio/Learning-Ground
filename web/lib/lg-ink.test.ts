@@ -14,7 +14,14 @@ const {
   highlightPoints,
   inkRandom,
   labelledTicks,
+  lineEnds,
   loopPoints,
+  isMarkVerdict,
+  MARK_STROKE_KINDS,
+  MARK_VERDICTS,
+  markBox,
+  markStrokes,
+  markVerdictFor,
   niceStep,
   numberLineLayout,
   numberLineStroke,
@@ -435,4 +442,98 @@ test("fraction models divide into equal parts and shade from the first", () => {
   assert.equal(capped.strokes.filter((stroke) => stroke.kind === "shade").length, 12);
   const none = shapeLayout("fraction_circle", { parts: Number.NaN }, "f");
   assert.ok(none && none.strokes.filter((stroke) => stroke.kind === "shade").length === 0);
+});
+
+// Marks for mark_work and ends for draw_line.
+
+const inside = (points: { x: number; y: number }[], area: { x: number; y: number; w: number; h: number }, slack = 3) =>
+  points.every(
+    (point) =>
+      point.x >= area.x - slack && point.x <= area.x + area.w + slack && point.y >= area.y - slack && point.y <= area.y + area.h + slack,
+  );
+
+test("a check mark is one stroke down then up to the right, inside its box", () => {
+  const area = { x: 500, y: 300, w: 40, h: 40 };
+  const strokes = markStrokes("correct", area, "p1.q3:1");
+  assert.deepEqual(strokes, markStrokes("correct", area, "p1.q3:1"));
+  assert.equal(strokes.length, 1);
+  const [{ kind, points }] = strokes;
+  assert.equal(kind, "line");
+  assert.ok(inside(points, area));
+  const first = points[0];
+  const last = points[points.length - 1];
+  const lowest = points.reduce((low, point) => (point.y > low.y ? point : low));
+  // Down to the bottom, left of centre, then up past the start to the upper right.
+  assert.ok(lowest.y > first.y && lowest.x < area.x + area.w / 2);
+  assert.ok(last.x > lowest.x && last.y < first.y);
+  // Points close together, so tldraw draws it evenly.
+  assert.ok(points.every((point, index) => !index || Math.hypot(point.x - points[index - 1].x, point.y - points[index - 1].y) <= 6));
+});
+
+test("a cross is two crossing strokes, and a question mark a hook and a dot", () => {
+  const area = { x: 0, y: 0, w: 40, h: 40 };
+  const cross = markStrokes("incorrect", area, "s1");
+  assert.equal(cross.length, 2);
+  assert.ok(cross.every((stroke) => stroke.kind === "line" && inside(stroke.points, area)));
+  // One runs down to the right, the other down to the left.
+  const slope = (points: { x: number; y: number }[]) => Math.sign(points[points.length - 1].x - points[0].x);
+  assert.deepEqual(cross.map((stroke) => slope(stroke.points)), [1, -1]);
+
+  const question = markStrokes("check_again", area, "q1");
+  assert.deepEqual(question.map((stroke) => stroke.kind), ["line", "dot"]);
+  assert.ok(question.every((stroke) => inside(stroke.points, area)));
+  const [hook, dot] = question;
+  // The dot sits below the hook.
+  assert.ok(Math.min(...dot.points.map((point) => point.y)) > Math.max(...hook.points.map((point) => point.y)));
+  assert.deepEqual(markStrokes("nonsense" as never, area, "q1"), []);
+  assert.deepEqual([...MARK_VERDICTS], ["correct", "incorrect", "check_again"]);
+});
+
+test("a mark sits just right of the work, level with a short piece and at the foot of a tall one", () => {
+  const short = markBox({ x: 100, y: 200, w: 300, h: 40 });
+  assert.ok(short.x > 400 && short.x < 430);
+  assert.ok(Math.abs(short.y + short.h / 2 - 220) < 1);
+  assert.ok(short.w >= 28 && short.w <= 44 && short.w === short.h);
+  const tall = markBox({ x: 100, y: 200, w: 300, h: 400 });
+  assert.equal(tall.y + tall.h, 600);
+  assert.equal(tall.w, 44);
+  // A tap-sized spot still gets a readable mark.
+  assert.equal(markBox({ x: 0, y: 0, w: 10, h: 10 }).w, 28);
+});
+
+test("a line joins the nearest edges of two boxes, short of each", () => {
+  const left = { x: 0, y: 0, w: 100, h: 50 };
+  const right = { x: 300, y: 0, w: 100, h: 50 };
+  const across = lineEnds(left, right);
+  assert.deepEqual(across.start, { x: 108, y: 25 });
+  assert.deepEqual(across.end, { x: 292, y: 25 });
+  // Stacked boxes join bottom to top, through the gap between them.
+  const below = { x: 0, y: 200, w: 100, h: 50 };
+  const down = lineEnds(left, below);
+  assert.deepEqual([down.start.y, down.end.y], [58, 192]);
+  assert.deepEqual([down.start.x, down.end.x], [50, 50]);
+  // Overlapping boxes still get a line between their centres.
+  const overlap = lineEnds(left, { x: 20, y: 10, w: 100, h: 50 });
+  assert.ok(Number.isFinite(overlap.start.x) && Number.isFinite(overlap.end.x));
+});
+
+test("each mark's stroke kinds are known before it's placed", () => {
+  for (const verdict of MARK_VERDICTS) {
+    const strokes = markStrokes(verdict, { x: 10, y: 10, w: 40, h: 40 }, "p1.q1");
+    assert.deepEqual(
+      strokes.map((stroke) => stroke.kind),
+      MARK_STROKE_KINDS[verdict],
+    );
+  }
+  assert.ok(isMarkVerdict("check_again"));
+  assert.ok(!isMarkVerdict("maybe") && !isMarkVerdict(undefined));
+});
+
+test("a work check's result picks its mark, and blank or unreadable work gets none", () => {
+  assert.equal(markVerdictFor("correct"), "correct");
+  assert.equal(markVerdictFor("error"), "incorrect");
+  assert.equal(markVerdictFor("incomplete"), "check_again");
+  assert.equal(markVerdictFor("blank"), undefined);
+  assert.equal(markVerdictFor("unreadable"), undefined);
+  assert.equal(markVerdictFor("constructor"), undefined);
 });

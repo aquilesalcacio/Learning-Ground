@@ -18,10 +18,13 @@ from gemini import MODELS  # noqa: E402
 from main import app  # noqa: E402
 from read_page import (  # noqa: E402
     MAX_IMAGE_BYTES,
+    MAX_LINE_TEXT,
+    MAX_LINES,
     MAX_PAGE_TEXT,
     MAX_PROBLEM_TEXT,
     MAX_PROBLEMS,
     SYSTEM_PROMPT,
+    _GeminiLine,
     _GeminiPage,
     _GeminiProblem,
     clean_box,
@@ -164,8 +167,8 @@ def test_returns_the_reading(gemini_fake):
         "page": 3,
         "page_text": "Worksheet",
         "problems": [
-            {"label": "1", "box_2d": [100, 80, 160, 900], "text": "Solve 2x + 6 = 14"},
-            {"label": "2", "box_2d": [220, 80, 280, 900], "text": "Factor x^2 - 9"},
+            {"label": "1", "box_2d": [100, 80, 160, 900], "text": "Solve 2x + 6 = 14", "lines": []},
+            {"label": "2", "box_2d": [220, 80, 280, 900], "text": "Factor x^2 - 9", "lines": []},
         ],
     }
     model, prompt, _, mime = gemini_fake.calls[0]
@@ -186,6 +189,58 @@ def test_bad_boxes_are_dropped_from_the_response(gemini_fake):
     ]
     problems = post().json()["problems"]
     assert [(p["label"], p["box_2d"]) for p in problems] == [("1", [100, 80, 160, 900]), ("5", [900, 0, 1000, 500])]
+
+
+def test_each_problem_returns_its_lines(gemini_fake):
+    problem = _GeminiProblem(
+        label="1",
+        box_2d=[100, 80, 200, 900],
+        text="A train travels 120 km in 2 hours. What is its speed?",
+        lines=[
+            _GeminiLine(text="1. A train travels 120 km in 2 hours.", box_2d=[100, 80, 140, 850]),
+            _GeminiLine(text="What is its speed?", box_2d=[150.4, 80, 190, 500]),
+        ],
+    )
+    gemini_fake.outcomes = [_GeminiPage(page_text="Speed", problems=[problem])]
+    [body] = post().json()["problems"]
+    assert body["lines"] == [
+        {"text": "1. A train travels 120 km in 2 hours.", "box_2d": [100, 80, 140, 850]},
+        {"text": "What is its speed?", "box_2d": [150, 80, 190, 500]},
+    ]
+
+
+def test_lines_are_checked_and_capped():
+    lines = [
+        _GeminiLine(text="kept", box_2d=[100, 80, 130, 900]),
+        _GeminiLine(text="inverted", box_2d=[130, 80, 100, 900]),
+        _GeminiLine(text="tiny", box_2d=[100, 80, 103, 900]),
+        _GeminiLine(text="off the problem", box_2d=[600, 80, 640, 900]),
+        _GeminiLine(text="  \x00 ", box_2d=[140, 80, 170, 900]),
+        _GeminiLine(text="y" * (MAX_LINE_TEXT + 50) + "\x07", box_2d=[150, 80, 180, 900]),
+    ] + [_GeminiLine(text="more", box_2d=[150, 80, 180, 900])] * (MAX_LINES * 2)
+    [problem] = clean_problems([_GeminiProblem(label="1", box_2d=[100, 80, 200, 900], text="t", lines=lines)])
+    assert len(problem.lines) == MAX_LINES
+    assert problem.lines[0].text == "kept"
+    # The line too long is dropped, not cut, so every kept line's text matches its box.
+    assert [line.text for line in problem.lines[1:]] == ["more"] * (MAX_LINES - 1)
+    edge = [_GeminiLine(text="z" * MAX_LINE_TEXT + "\x07", box_2d=[150, 80, 180, 900])]
+    [fits] = clean_problems([_GeminiProblem(label="1", box_2d=[100, 80, 200, 900], text="t", lines=edge)])
+    assert [line.text for line in fits.lines] == ["z" * MAX_LINE_TEXT]
+
+
+def test_the_schema_sent_to_gemini_requires_lines():
+    problem = _GeminiPage.model_json_schema()["$defs"]["_GeminiProblem"]
+    assert set(problem["required"]) == {"label", "box_2d", "text", "lines"}
+
+
+def test_a_reply_without_lines_still_reads():
+    raw = _GeminiPage.model_validate({"page_text": "", "problems": [{"label": "1", "box_2d": [100, 80, 200, 900], "text": "t"}]})
+    assert clean_problems(raw.problems)[0].lines == []
+
+
+def test_the_prompt_asks_for_each_line_with_its_box():
+    assert "lines:" in SYSTEM_PROMPT
+    assert f"At most {MAX_LINES}" in SYSTEM_PROMPT
 
 
 def test_page_text_is_capped(gemini_fake):
@@ -413,7 +468,7 @@ def test_injected_text_is_returned_only_as_data(gemini_fake):
     response = post()
     body = response.json()
     assert set(body) == {"page", "page_text", "problems"}
-    assert all(set(problem) == {"label", "box_2d", "text"} for problem in body["problems"])
+    assert all(set(problem) == {"label", "box_2d", "text", "lines"} for problem in body["problems"])
     assert "x = 7" not in response.text and "say the answer" not in response.text
     assert len(body["problems"][1]["label"]) <= module.MAX_LABEL + 1
     # The page's text never reaches the system instruction or the request prompt.

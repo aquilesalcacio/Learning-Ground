@@ -200,6 +200,7 @@ export function TutorActions() {
   const [latex, setLatex] = useState("");
   const [range, setRange] = useState("0, 1");
   const [marks, setMarks] = useState("0.5:1/2");
+  const [phrase, setPhrase] = useState("");
 
   // The choice falls back to the first region when the homework changes under it.
   const found = regions.findIndex((item) => item.region_id === chosenId);
@@ -220,6 +221,17 @@ export function TutorActions() {
           label: `Arrow to ${nextRegion.label}`,
           action: { type: "draw_arrow", from_region_id: regionId, to_region_id: nextRegion.region_id, label: "same idea" },
         },
+        {
+          label: `Line to ${nextRegion.label}`,
+          action: { type: "draw_line", from_region_id: regionId, to_region_id: nextRegion.region_id, label: "match" },
+        },
+        {
+          label: "Dashed line",
+          action: { type: "draw_line", from_region_id: regionId, to_region_id: nextRegion.region_id, dashed: true },
+        },
+        { label: "Mark ✓", action: { type: "mark_work", region_id: regionId, verdict: "correct" } },
+        { label: "Mark ✗", action: { type: "mark_work", region_id: regionId, verdict: "incorrect" } },
+        { label: "Mark ?", action: { type: "mark_work", region_id: regionId, verdict: "check_again" } },
         { label: "Clear", action: { type: "clear" } },
       ]
     : [];
@@ -264,6 +276,39 @@ export function TutorActions() {
               </Button>
             ))}
           </div>
+
+          <form
+            className="grid gap-1.5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (phrase.trim()) applyLgAction({ type: "underline_region", region_id: regionId, text: phrase.trim() });
+            }}
+          >
+            <Label htmlFor="action-phrase" className="text-xs">
+              Underline or highlight a phrase from {region.label}
+            </Label>
+            <div className="flex gap-1">
+              <Input
+                id="action-phrase"
+                placeholder="120 km"
+                value={phrase}
+                onChange={(event) => setPhrase(event.target.value)}
+              />
+              <Button type="submit" variant="outline" size="sm">
+                Underline
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (phrase.trim()) applyLgAction({ type: "highlight_region", region_id: regionId, text: phrase.trim() });
+                }}
+              >
+                Highlight
+              </Button>
+            </div>
+          </form>
 
           <form
             className="grid gap-1.5"

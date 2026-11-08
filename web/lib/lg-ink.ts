@@ -153,6 +153,29 @@ export function arrowEnds(from: InkBounds, to: InkBounds): { start: InkPoint; en
   return { start, end, bend: end.y >= start.y ? ARROW_BEND : -ARROW_BEND };
 }
 
+// Where a plain line between two boxes starts and ends: on the straight run between their centres,
+// just outside each box, so it joins their nearest edges. Boxes that touch or overlap are joined
+// centre to centre.
+const LINE_GAP = 8;
+
+export function lineEnds(from: InkBounds, to: InkBounds, gap = LINE_GAP): { start: InkPoint; end: InkPoint } {
+  const a = { x: from.x + from.w / 2, y: from.y + from.h / 2 };
+  const b = { x: to.x + to.w / 2, y: to.y + to.h / 2 };
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const length = Math.hypot(dx, dy);
+  if (!length) return { start: a, end: b };
+  // How far from its centre the run leaves a box, along the run.
+  const exit = (box: InkBounds) =>
+    Math.min(dx ? box.w / 2 / Math.abs(dx) : Infinity, dy ? box.h / 2 / Math.abs(dy) : Infinity) * length;
+  const startAt = exit(from) + gap;
+  const endAt = length - exit(to) - gap;
+  if (startAt >= endAt) return { start: a, end: b };
+  const round = (value: number) => Math.round(value * 100) / 100;
+  const along = (distance: number) => ({ x: round(a.x + (dx / length) * distance), y: round(a.y + (dy / length) * distance) });
+  return { start: along(startAt), end: along(endAt) };
+}
+
 // Signed distance of a curve's middle from its chord, the way tldraw reads an arrow's bend.
 function bendOf(start: InkPoint, end: InkPoint, middle: InkPoint): number {
   const length = Math.hypot(end.x - start.x, end.y - start.y);
@@ -678,5 +701,121 @@ export function shapeLayout(kind: string, options: ShapeOptions, seed: string): 
     }
     default:
       return null;
+  }
+}
+
+// Marks for the mark_work tool: a check, a cross or a question mark, drawn by hand beside the
+// student's work. Each stroke wobbles a little, seeded like the other marks.
+export const MARK_VERDICTS = ["correct", "incorrect", "check_again"] as const;
+export type MarkVerdict = (typeof MARK_VERDICTS)[number];
+// line: a pen stroke. dot: a small closed loop, filled, as the dot of a question mark.
+export type MarkStroke = { kind: "line" | "dot"; points: InkPoint[] };
+// Each mark's strokes, in drawing order, known before the mark is placed.
+export const MARK_STROKE_KINDS: Record<MarkVerdict, MarkStroke["kind"][]> = {
+  correct: ["line"],
+  incorrect: ["line", "line"],
+  check_again: ["line", "dot"],
+};
+
+export const isMarkVerdict = (value: unknown): value is MarkVerdict => MARK_VERDICTS.includes(value as MarkVerdict);
+
+// The mark for a work check's result: a check when it's right, a cross for a mistake, a question
+// mark when it's unfinished. Nothing found or nothing readable gets no mark.
+const CHECK_MARKS: Record<string, MarkVerdict> = { correct: "correct", error: "incorrect", incomplete: "check_again" };
+
+export function markVerdictFor(status: string): MarkVerdict | undefined {
+  return Object.hasOwn(CHECK_MARKS, status) ? CHECK_MARKS[status] : undefined;
+}
+
+const MARK_MIN = 28;
+const MARK_MAX = 44;
+const MARK_GAP = 14;
+
+// The square a mark goes in: just right of the work, level with it when it's short, or at its
+// foot when it's tall, where the last line, usually the answer, is.
+export function markBox(beside: InkBounds): InkBounds {
+  const size = Math.min(MARK_MAX, Math.max(MARK_MIN, beside.h * 0.8));
+  const y = beside.h > size * 2 ? beside.y + beside.h - size : beside.y + beside.h / 2 - size / 2;
+  return { x: beside.x + beside.w + MARK_GAP, y, w: size, h: size };
+}
+
+// A stroke through points given as shares of the box, each nudged a little, bowed slightly.
+function markStroke(box: InkBounds, shares: [number, number][], random: () => number): InkPoint[] {
+  const points = shares.map(([x, y]) => ({ x: box.x + box.w * x + (random() - 0.5) * 2, y: box.y + box.h * y + (random() - 0.5) * 2 }));
+  const bowed: InkPoint[] = [points[0]];
+  for (let index = 1; index < points.length; index += 1) {
+    const from = points[index - 1];
+    const to = points[index];
+    const length = Math.hypot(to.x - from.x, to.y - from.y) || 1;
+    const sag = (random() - 0.5) * 2.5;
+    bowed.push({ x: (from.x + to.x) / 2 - ((to.y - from.y) / length) * sag, y: (from.y + to.y) / 2 + ((to.x - from.x) / length) * sag }, to);
+  }
+  return densify(bowed, 3);
+}
+
+// The strokes of a mark in its box, in drawing order, or none for a verdict it doesn't know.
+export function markStrokes(verdict: MarkVerdict, box: InkBounds, seed: string): MarkStroke[] {
+  const random = inkRandom(`mark:${verdict}:${seed}`);
+  switch (verdict) {
+    case "correct":
+      // A short stroke down, then a long one up to the right.
+      return [
+        {
+          kind: "line",
+          points: markStroke(
+            box,
+            [
+              [0.06, 0.55],
+              [0.38, 0.9],
+              [0.95, 0.07],
+            ],
+            random,
+          ),
+        },
+      ];
+    case "incorrect":
+      return [
+        {
+          kind: "line",
+          points: markStroke(
+            box,
+            [
+              [0.1, 0.1],
+              [0.9, 0.9],
+            ],
+            random,
+          ),
+        },
+        {
+          kind: "line",
+          points: markStroke(
+            box,
+            [
+              [0.9, 0.1],
+              [0.12, 0.88],
+            ],
+            random,
+          ),
+        },
+      ];
+    case "check_again": {
+      // The hook runs from the left, over the top and round to below the right, then down.
+      const radius = Math.min(box.w, box.h) * 0.22;
+      const center = { x: box.x + box.w / 2, y: box.y + box.h * 0.3 };
+      const from = Math.PI * 1.05;
+      const to = Math.PI * 2.4;
+      const count = Math.max(8, Math.ceil((radius * (to - from)) / 3));
+      const arc = Array.from({ length: count + 1 }, (_, index) => {
+        const angle = from + ((to - from) * index) / count;
+        return { x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius };
+      });
+      const stem = { x: box.x + box.w * 0.5 + (random() - 0.5) * 2, y: box.y + box.h * 0.66 };
+      return [
+        { kind: "line", points: densify([...arc, stem], 3) },
+        { kind: "dot", points: dotPoints({ x: box.x + box.w * 0.5, y: box.y + box.h * 0.88 }, 2.5) },
+      ];
+    }
+    default:
+      return [];
   }
 }
