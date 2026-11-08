@@ -42,6 +42,7 @@ export function AppSidebar({
   const conversations = hydrated ? sortedConversations(state) : [];
   const { name, school } = state.profile;
   const { user } = useUser();
+  const photo = state.canvas_lms?.photo_url || user?.picture;
   // The name the student typed (or imported) wins; Auth0's is the fallback.
   const displayName = name.trim() || user?.name?.trim() || "";
 
@@ -156,9 +157,9 @@ export function AppSidebar({
           aria-current={pathname.startsWith("/profile") ? "page" : undefined}
           className="flex items-center gap-2.5 p-3 outline-none hover:bg-muted focus-visible:bg-muted aria-[current=page]:bg-muted"
         >
-          {user?.picture ? (
-            // eslint-disable-next-line @next/next/no-img-element -- Auth0 avatars come from many hosts.
-            <img src={user.picture} alt="" referrerPolicy="no-referrer" className="size-8 shrink-0 rounded-full" />
+          {photo ? (
+            // eslint-disable-next-line @next/next/no-img-element -- Canvas LMS and Auth0 avatars come from many hosts.
+            <img src={photo} alt="" referrerPolicy="no-referrer" className="size-8 shrink-0 rounded-full" />
           ) : (
             <span
               aria-hidden="true"

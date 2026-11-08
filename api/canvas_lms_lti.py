@@ -14,10 +14,12 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from html import unescape
 from urllib.parse import quote, urlsplit, urlunsplit
 from xml.sax.saxutils import escape
 
@@ -43,10 +45,25 @@ CUSTOM_FIELDS = {
     "assignment_due_at": "$Canvas.assignment.dueAt.iso8601",
     "assignment_points": "$Canvas.assignment.pointsPossible",
     "canvas_lms_domain": "$Canvas.api.domain",
+    "person_image": "$User.image",
+    "membership_roles": "$Canvas.membership.roles",
+    "enrollment_state": "$Canvas.enrollment.enrollmentState",
+    "course_id": "$Canvas.course.id",
+    "course_start_at": "$Canvas.course.startAt",
+    "course_end_at": "$Canvas.course.endAt",
+    # The module item's own title, e.g. "Unit 3: Fractions practice". Module names need the REST API.
+    "link_title": "$ResourceLink.title",
+    "module_id": "$Canvas.module.id",
+    "assignment_id": "$Canvas.assignment.id",
+    "assignment_description": "$Canvas.assignment.description",
+    "assignment_attempts_used": "$Canvas.assignment.submission.studentAttempts",
+    "assignment_attempts_allowed": "$Canvas.assignment.allowedAttempts",
+    "assignment_lock_at": "$Canvas.assignment.lockAt.iso8601",
 }
+INSTRUCTIONS_MAX = 3000
 
 _used_nonces: dict[str, float] = {}
-_handoffs: dict[str, tuple[float, "CanvasLmsLaunch"]] = {}
+_handoffs: dict[str, tuple[float, "CanvasLmsLaunch", "Outcome | None"]] = {}
 
 
 class LtiError(Exception):
@@ -75,6 +92,30 @@ class CanvasLmsLaunch(BaseModel):
     # "Course: assignment (due ...)", ready for the profile's Coming up box.
     upcoming_line: str = ""
     canvas_lms_domain: str = ""
+    photo_url: str = ""
+    enrollment_state: str = ""
+    course_id: str = ""
+    course_start_at: str = ""
+    course_end_at: str = ""
+    link_title: str = ""
+    module_id: str = ""
+    assignment_id: str = ""
+    # Plain text, from the assignment's HTML description.
+    assignment_instructions: str = ""
+    assignment_due_label: str = ""
+    assignment_attempts_used: str = ""
+    assignment_attempts_allowed: str = ""
+    assignment_lock_at: str = ""
+    # Set when Canvas LMS let us turn work in for this student (a student launching a graded assignment).
+    turn_in_id: str = ""
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """Where to send a grade back: from lis_outcome_service_url and lis_result_sourcedid."""
+
+    service_url: str
+    sourcedid: str
 
 
 @dataclass(frozen=True)
@@ -210,8 +251,37 @@ def _sections(raw: str) -> list[str]:
 
 def _roles(raw: str) -> list[str]:
     # "urn:lti:role:ims/lis/Learner,Instructor" becomes ["Learner", "Instructor"].
-    roles = {part.rsplit("/", 1)[-1].rsplit(":", 1)[-1] for part in raw.split(",") if part.strip()}
-    return sorted(roles)
+    # Canvas LMS's own roles read "StudentEnrollment", so that becomes "Student".
+    roles = {part.rsplit("/", 1)[-1].rsplit(":", 1)[-1].removesuffix("Enrollment") for part in raw.split(",") if part.strip()}
+    return sorted(role for role in roles if role)
+
+
+def html_to_text(html: str, limit: int = INSTRUCTIONS_MAX) -> str:
+    """Assignment descriptions are HTML. The tutor gets plain text, with paragraphs kept apart."""
+    text = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", html)
+    text = re.sub(r"(?i)<br\s*/?>|</(p|div|li|h[1-6]|tr)>", "\n", text)
+    text = re.sub(r"(?i)<li[^>]*>", "- ", text)
+    text = unescape(re.sub(r"<[^>]+>", " ", text))
+    lines = [re.sub(r"[ \t\u00a0]+", " ", line).strip() for line in text.split("\n")]
+    text = "\n".join(line for line in lines if line)
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def _parse_time(value: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(canvas_lms.timezone()) if value else None
+    except ValueError:
+        return None
+
+
+def _photo(url: str) -> str:
+    # Only https images, so a launch can't point the sidebar anywhere odd.
+    return url if url.startswith("https://") else ""
+
+
+def outcome_of(fields: dict[str, str]) -> Outcome | None:
+    url, sourcedid = fields.get("lis_outcome_service_url", ""), fields.get("lis_result_sourcedid", "")
+    return Outcome(url, sourcedid) if url.startswith("https://") and sourcedid else None
 
 
 def launch_data(fields: dict[str, str]) -> CanvasLmsLaunch:
@@ -219,14 +289,11 @@ def launch_data(fields: dict[str, str]) -> CanvasLmsLaunch:
     course = get("custom_course_name") or get("context_title")
     title = get("custom_assignment_title")
     due_at = get("custom_assignment_due_at", 40)
+    due = _parse_time(due_at)
     line = ""
     if title:
-        due = None
-        try:
-            due = datetime.fromisoformat(due_at.replace("Z", "+00:00")).astimezone(canvas_lms.timezone()) if due_at else None
-        except ValueError:
-            due = None
         line = canvas_lms.upcoming_line(course, title, due) if due else f"{course + ': ' if course else ''}{title}"
+    roles = _roles(get("custom_membership_roles", 300) or fields.get("roles", ""))
     return CanvasLmsLaunch(
         name=get("custom_person_name") or get("lis_person_name_full"),
         email=get("custom_person_email") or get("lis_person_contact_email_primary"),
@@ -236,29 +303,48 @@ def launch_data(fields: dict[str, str]) -> CanvasLmsLaunch:
         course_code=get("custom_course_code") or get("context_label"),
         sections=_sections(fields.get("custom_section_names", "")),
         term=get("custom_term_name"),
-        roles=_roles(fields.get("roles", "")),
+        roles=roles,
         assignment_title=title,
         assignment_due_at=due_at,
         assignment_points=get("custom_assignment_points", 20),
         upcoming_line=line,
         canvas_lms_domain=get("custom_canvas_lms_domain", 120),
+        photo_url=_photo(get("custom_person_image", 500)),
+        enrollment_state=get("custom_enrollment_state", 40),
+        course_id=get("custom_course_id", 40),
+        course_start_at=get("custom_course_start_at", 40),
+        course_end_at=get("custom_course_end_at", 40),
+        link_title=get("custom_link_title") or get("resource_link_title"),
+        module_id=get("custom_module_id", 40),
+        assignment_id=get("custom_assignment_id", 40),
+        assignment_instructions=html_to_text(_clean(fields.get("custom_assignment_description"), 50_000)),
+        assignment_due_label=canvas_lms.due_label(due) if due else "",
+        assignment_attempts_used=get("custom_assignment_attempts_used", 10),
+        assignment_attempts_allowed=get("custom_assignment_attempts_allowed", 10),
+        assignment_lock_at=get("custom_assignment_lock_at", 40),
     )
 
 
-def hand_off(launch: CanvasLmsLaunch, now: float | None = None) -> str:
+def hand_off(launch: CanvasLmsLaunch, outcome: Outcome | None = None, now: float | None = None) -> str:
     """Keeps the launch for HANDOFF_TTL_SECONDS under a one-time code for the web app to claim."""
     now = time.time() if now is None else now
-    for code, (expiry, _) in list(_handoffs.items()):
+    for code, (expiry, _, _) in list(_handoffs.items()):
         if expiry < now:
             del _handoffs[code]
     code = secrets.token_urlsafe(24)
-    _handoffs[code] = (now + HANDOFF_TTL_SECONDS, launch)
+    _handoffs[code] = (now + HANDOFF_TTL_SECONDS, launch, outcome)
     return code
 
 
-def claim(code: str, now: float | None = None) -> CanvasLmsLaunch | None:
+def claim(code: str, sub: str, now: float | None = None) -> CanvasLmsLaunch | None:
+    """The logged-in student collects a launch. A grade-back address is kept for them alone."""
     now = time.time() if now is None else now
     entry = _handoffs.pop(code, None)
     if not entry or entry[0] < now:
         return None
-    return entry[1]
+    _, launch, outcome = entry
+    if outcome:
+        import canvas_lms_grades  # Imported here: canvas_lms_grades imports this module.
+
+        launch = launch.model_copy(update={"turn_in_id": canvas_lms_grades.save_turn_in(sub, outcome, launch)})
+    return launch

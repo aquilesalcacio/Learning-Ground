@@ -31,10 +31,18 @@ class CalendarFeedError(Exception):
     """The feed couldn't be used. The message is safe to show the student."""
 
 
+class CalendarFeedItem(BaseModel):
+    # Canvas LMS tags feed events with the course code, e.g. "SB-101". The web app swaps in names it knows.
+    course_code: str
+    title: str
+    due: str
+
+
 class CalendarFeedImport(BaseModel):
     courses: list[str]
     upcoming: str
     event_count: int
+    items: list[CalendarFeedItem] = []
 
 
 def _allowed_hosts() -> tuple[str, ...]:
@@ -124,11 +132,15 @@ def summarize(events: list[tuple[datetime, bool, str, str]], now: datetime) -> C
         if (e[0] >= today if e[1] else e[0] >= now) and e[0] <= now + timedelta(days=WINDOW_DAYS)
     ]
     soon.sort(key=lambda e: e[0])
-    lines = [canvas_lms.upcoming_line(course, title, start, all_day) for start, all_day, title, course in soon]
+    soon = soon[: canvas_lms.MAX_UPCOMING]
     return CalendarFeedImport(
         courses=courses[:MAX_COURSES],
-        upcoming="\n".join(lines[: canvas_lms.MAX_UPCOMING]),
+        upcoming="\n".join(canvas_lms.upcoming_line(course, title, start, all_day) for start, all_day, title, course in soon),
         event_count=len(events),
+        items=[
+            CalendarFeedItem(course_code=course, title=title, due=canvas_lms.due_label(start, all_day))
+            for start, all_day, title, course in soon
+        ],
     )
 
 

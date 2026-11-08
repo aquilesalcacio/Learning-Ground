@@ -77,8 +77,8 @@ def test_signed_launch_hands_off_to_the_profile():
     response = launch(signed(CANVAS_LMS_LAUNCH))
     assert response.status_code == 303
     location = urlparse(response.headers["location"])
-    assert location.path == "/profile"
-    code = parse_qs(location.query)["canvas_lms_launch"][0]
+    assert location.path == "/canvas-lms/launch"
+    code = parse_qs(location.query)["code"][0]
 
     claimed = client.post("/canvas-lms/launch/claim", json={"code": code})
     assert claimed.status_code == 200
@@ -101,7 +101,7 @@ def test_signed_launch_hands_off_to_the_profile():
 def test_course_menu_launch_without_assignment():
     fields = {k: v for k, v in CANVAS_LMS_LAUNCH.items() if not k.startswith("custom_assignment")}
     fields["custom_assignment_title"] = "$Canvas.assignment.title"
-    code = parse_qs(urlparse(launch(signed(fields)).headers["location"]).query)["canvas_lms_launch"][0]
+    code = parse_qs(urlparse(launch(signed(fields)).headers["location"]).query)["code"][0]
     data = client.post("/canvas-lms/launch/claim", json={"code": code}).json()
     assert data["assignment_title"] == "" and data["upcoming_line"] == ""
     assert data["course"] == "Sharkbyte test"
@@ -110,6 +110,39 @@ def test_course_menu_launch_without_assignment():
 def test_full_lis_roles_are_shortened():
     fields = {**CANVAS_LMS_LAUNCH, "roles": "urn:lti:role:ims/lis/Instructor,urn:lti:instrole:ims/lis/Administrator"}
     assert canvas_lms_lti.launch_data(fields).roles == ["Administrator", "Instructor"]
+
+
+def test_canvas_lms_roles_and_extra_fields():
+    fields = {
+        **CANVAS_LMS_LAUNCH,
+        "custom_membership_roles": "StudentEnrollment",
+        "custom_enrollment_state": "active",
+        "custom_person_image": "https://canvaslite.instructure.com/images/thumbnails/1/abc",
+        "custom_link_title": "Unit 3: Cells practice",
+        "custom_module_id": "$Canvas.module.id",
+        "custom_assignment_description": "<p>Label the <b>cell</b> parts.</p><ul><li>Nucleus</li><li>Wall &amp; membrane</li></ul><script>x()</script>",
+        "custom_assignment_attempts_used": "1",
+        "custom_assignment_attempts_allowed": "3",
+    }
+    data = canvas_lms_lti.launch_data(fields)
+    assert data.roles == ["Student"]
+    assert data.enrollment_state == "active"
+    assert data.photo_url.startswith("https://")
+    assert data.link_title == "Unit 3: Cells practice"
+    assert data.module_id == ""
+    assert data.assignment_instructions == "Label the cell parts.\n- Nucleus\n- Wall & membrane"
+    assert data.assignment_due_label == "Tue Nov 10, 9:00 AM"
+    assert (data.assignment_attempts_used, data.assignment_attempts_allowed) == ("1", "3")
+
+
+def test_photo_must_be_https():
+    data = canvas_lms_lti.launch_data({**CANVAS_LMS_LAUNCH, "custom_person_image": "javascript:alert(1)"})
+    assert data.photo_url == ""
+
+
+def test_long_instructions_are_capped():
+    data = canvas_lms_lti.launch_data({**CANVAS_LMS_LAUNCH, "custom_assignment_description": "word " * 5000})
+    assert len(data.assignment_instructions) <= canvas_lms_lti.INSTRUCTIONS_MAX + 1
 
 
 @pytest.mark.parametrize(

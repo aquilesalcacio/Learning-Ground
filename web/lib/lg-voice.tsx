@@ -4,7 +4,7 @@ import { type ClientTools, ConversationProvider, useConversation } from "@eleven
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import { applyLgAction, type LgAction } from "./lg-actions";
 import { checkStudentWork, type WorkCheck, workReport } from "./lg-check-work";
-import { getActiveDocument, readLgState } from "./lg-store";
+import { getActiveConversation, getActiveDocument, readLgState } from "./lg-store";
 import { buildTutorPrompt, type LgHomeworkContext, resolveLanguage, toneVoiceSettings } from "./lg-tutor-prompt";
 import { findVoice } from "./lg-voices";
 import type { ChatSpeaker, LgDocument, Tutor } from "./lg-types";
@@ -70,7 +70,12 @@ function sessionOptions({ tutor, textOnly }: SessionRequest) {
   const state = readLgState();
   const language = resolveLanguage(tutor, state.profile);
   const voice = findVoice(language, tutor.voice_id);
-  const prompt = buildTutorPrompt(tutor, state.profile, homeworkContext(getActiveDocument(state)));
+  const prompt = buildTutorPrompt(
+    tutor,
+    state.profile,
+    homeworkContext(getActiveDocument(state)),
+    getActiveConversation(state)?.canvas_lms_assignment ?? null,
+  );
   return {
     agentId: AGENT_ID,
     textOnly,

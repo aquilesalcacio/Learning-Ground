@@ -6,8 +6,14 @@
 // - OAuth2: needs a school's Developer Key, so it only shows when the server has one (api/canvas_lms.py).
 import { LgApiAuthError, lgApiFetch } from "./lg-api";
 import { apiErrorMessage } from "./lg-document";
-import { readLgState, updateProfile } from "./lg-store";
-import type { LgLanguage, StudentProfile } from "./lg-types";
+import {
+  markCanvasLmsTurnedIn,
+  readLgState,
+  setCanvasLmsInfo,
+  startCanvasLmsAssignmentChat,
+  updateProfile,
+} from "./lg-store";
+import type { CanvasLmsCourse, Conversation, LgLanguage, StudentProfile, WorkCheckRecord } from "./lg-types";
 
 export type CanvasLmsStatus = {
   connected: boolean;
@@ -31,10 +37,23 @@ export type CanvasLmsLaunch = {
   sections: string[];
   roles: string[];
   assignment_title: string;
+  assignment_due_at: string;
+  assignment_points: string;
   upcoming_line: string;
+  photo_url: string;
+  enrollment_state: string;
+  course_start_at: string;
+  course_end_at: string;
+  link_title: string;
+  assignment_instructions: string;
+  assignment_due_label: string;
+  assignment_attempts_used: string;
+  assignment_attempts_allowed: string;
+  turn_in_id: string;
 };
 
-export type CalendarFeedImport = { courses: string[]; upcoming: string; event_count: number };
+type CalendarFeedItem = { course_code: string; title: string; due: string };
+export type CalendarFeedImport = { courses: string[]; upcoming: string; event_count: number; items: CalendarFeedItem[] };
 
 export type CanvasLmsResult<T> = { ok: true; value: T } | { ok: false; message: string };
 
@@ -69,9 +88,22 @@ export function canvasLmsStatus() {
 
 // --- LTI: opened from a Canvas LMS course -------------------------------------------------------
 
+function rememberCourse(courses: CanvasLmsCourse[], launch: CanvasLmsLaunch): CanvasLmsCourse[] {
+  if (!launch.course) return courses;
+  const course: CanvasLmsCourse = {
+    name: launch.course,
+    code: launch.course_code,
+    sections: launch.sections,
+    start_at: launch.course_start_at,
+    end_at: launch.course_end_at,
+  };
+  return [course, ...courses.filter((item) => item.name !== course.name)].slice(0, 12);
+}
+
 // Collects what Canvas LMS sent when the student opened Learning Grounds, and fills the profile.
-// Canvas LMS is the source of truth for name and course; the student's own notes stay.
-export async function claimCanvasLmsLaunch(code: string): Promise<CanvasLmsResult<CanvasLmsLaunch>> {
+// Canvas LMS is the source of truth for name and course; the student's own notes stay. A launch
+// from an assignment opens a new chat about it. Returns where to go next.
+export async function claimCanvasLmsLaunch(code: string): Promise<CanvasLmsResult<{ launch: CanvasLmsLaunch; to: string }>> {
   const result = await call<CanvasLmsLaunch>(
     "/canvas-lms/launch/claim",
     postJson({ code }),
@@ -79,7 +111,8 @@ export async function claimCanvasLmsLaunch(code: string): Promise<CanvasLmsResul
   );
   if (!result.ok) return result;
   const launch = result.value;
-  const current = readLgState().profile;
+  const state = readLgState();
+  const current = state.profile;
   updateProfile({
     name: launch.name || current.name,
     school: current.school || launch.school,
@@ -87,15 +120,46 @@ export async function claimCanvasLmsLaunch(code: string): Promise<CanvasLmsResul
     upcoming: mergeLines(current.upcoming, [launch.upcoming_line]),
     language: current.language || launch.language,
   });
-  return result;
+  setCanvasLmsInfo({
+    name: launch.name,
+    photo_url: launch.photo_url,
+    roles: launch.roles,
+    enrollment_state: launch.enrollment_state,
+    school: launch.school,
+    courses: rememberCourse(state.canvas_lms?.courses ?? [], launch),
+    linked_at: Date.now(),
+  });
+  if (!launch.assignment_title) return { ok: true, value: { launch, to: "/profile" } };
+  startCanvasLmsAssignmentChat({
+    title: launch.assignment_title,
+    course: launch.course,
+    course_code: launch.course_code,
+    link_title: launch.link_title,
+    due_at: launch.assignment_due_at,
+    due_label: launch.assignment_due_label,
+    points: launch.assignment_points,
+    attempts_used: launch.assignment_attempts_used,
+    attempts_allowed: launch.assignment_attempts_allowed,
+    instructions: launch.assignment_instructions,
+    turn_in_id: launch.turn_in_id,
+    turned_in_at: "",
+  });
+  return { ok: true, value: { launch, to: "/" } };
 }
 
 // --- Calendar feed -----------------------------------------------------------------------------
 
 function applyFeed(feed: CalendarFeedImport) {
-  const current = readLgState().profile;
+  const state = readLgState();
+  // Canvas LMS tags feed events with course codes ("SB-101"). Launches taught us the names behind them.
+  const names = new Map((state.canvas_lms?.courses ?? []).filter((c) => c.code).map((c) => [c.code, c.name]));
+  const named = (code: string) => names.get(code) ?? code;
+  const upcoming = feed.items.map((item) => `${item.course_code ? `${named(item.course_code)}: ` : ""}${item.title} (due ${item.due})`);
   // The feed lists every due date across courses, so it replaces Coming up rather than adding to it.
-  updateProfile({ courses: mergeLines(current.courses, feed.courses), upcoming: feed.upcoming || current.upcoming });
+  updateProfile({
+    courses: mergeLines(state.profile.courses, feed.courses.map(named)),
+    upcoming: upcoming.join("\n") || state.profile.upcoming,
+  });
 }
 
 export async function addCanvasLmsCalendarFeed(url: string): Promise<CanvasLmsResult<CalendarFeedImport>> {
@@ -142,4 +206,46 @@ export async function importCanvasLmsProfile(): Promise<CanvasLmsResult<CanvasLm
 
 export function disconnectCanvasLms() {
   return call<CanvasLmsStatus>("/canvas-lms/disconnect", { method: "POST" }, "Couldn't disconnect Canvas LMS.");
+}
+
+// --- Turn in to Canvas LMS ----------------------------------------------------------------------
+
+export type TurnInSummary = {
+  turn_in_id: string;
+  tutor_name: string;
+  started_at: number;
+  minutes: number;
+  student_messages: number;
+  tutor_messages: number;
+  checks: WorkCheckRecord[];
+  note: string;
+};
+
+// What the chat knows about the session. The server writes the text and decides the score.
+export function sessionSummary(conversation: Conversation, tutor_name: string, note: string): TurnInSummary {
+  const count = (who: string) => conversation.messages.filter((message) => message.who === who).length;
+  return {
+    turn_in_id: conversation.canvas_lms_assignment?.turn_in_id ?? "",
+    tutor_name: tutor_name.slice(0, 60),
+    started_at: conversation.created_at,
+    minutes: Math.min(Math.round((Date.now() - conversation.created_at) / 60_000), 24 * 60),
+    student_messages: count("student"),
+    tutor_messages: count("tutor"),
+    checks: (conversation.work_checks ?? []).slice(-30).map((check) => ({ ...check, label: check.label.slice(0, 80) })),
+    note: note.slice(0, 600),
+  };
+}
+
+export function previewTurnIn(summary: TurnInSummary) {
+  return call<{ html: string; score: string }>("/canvas-lms/turn-in/preview", postJson(summary), "Couldn't prepare the turn-in.");
+}
+
+export async function turnInToCanvasLms(conversation_id: string, summary: TurnInSummary) {
+  const result = await call<{ turned_in_at: string; score: string }>(
+    "/canvas-lms/turn-in",
+    postJson(summary),
+    "Couldn't turn this in to Canvas LMS.",
+  );
+  if (result.ok) markCanvasLmsTurnedIn(conversation_id, result.value.turned_in_at);
+  return result;
 }

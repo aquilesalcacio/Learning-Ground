@@ -4,7 +4,7 @@ import { LgApiAuthError, lgApiFetch } from "./lg-api";
 import { captureLgRegion } from "./lg-board-link";
 import { apiErrorMessage } from "./lg-document";
 import { findRegion } from "./lg-regions";
-import { getActiveDocument, getActiveTutor, readLgState } from "./lg-store";
+import { getActiveDocument, getActiveTutor, readLgState, recordWorkCheck } from "./lg-store";
 
 export type WorkCheck = {
   status: "correct" | "incomplete" | "error" | "blank" | "unreadable";
@@ -40,7 +40,9 @@ export async function checkStudentWork(region_id: string): Promise<WorkCheckOutc
   try {
     const response = await lgApiFetch("/check-work", { method: "POST", body: form });
     if (!response.ok) return { ok: false, message: await apiErrorMessage(response, "Check my work failed. Please try again.") };
-    return { ok: true, region_id: checked_id, label, check: (await response.json()) as WorkCheck };
+    const check = (await response.json()) as WorkCheck;
+    recordWorkCheck({ label, status: check.status });
+    return { ok: true, region_id: checked_id, label, check };
   } catch (error) {
     if (error instanceof LgApiAuthError) return { ok: false, message: error.message };
     return { ok: false, message: "Check my work can't reach the API. Is it running on port 8000?" };

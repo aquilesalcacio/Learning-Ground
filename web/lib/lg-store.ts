@@ -1,7 +1,17 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import type { ChatMessage, ChatSpeaker, Conversation, LgDocument, StudentProfile, Tutor } from "./lg-types";
+import type {
+  CanvasLmsAssignment,
+  CanvasLmsInfo,
+  ChatMessage,
+  ChatSpeaker,
+  Conversation,
+  LgDocument,
+  StudentProfile,
+  Tutor,
+  WorkCheckRecord,
+} from "./lg-types";
 
 // Browser-only storage for the mock. FastAPI and Postgres replace this later.
 const STORAGE_KEY = "lg-state-v1";
@@ -18,6 +28,7 @@ export type LgState = {
   // The ID the next chat will take. The start screen's board is already saved under it,
   // so whatever the student draws there carries over when the chat begins.
   draft_id: string;
+  canvas_lms: CanvasLmsInfo | null;
 };
 
 function preset(id: string, name: string, color: Tutor["color"], language: Tutor["language"], tone: Tutor["tone"]): Tutor {
@@ -36,6 +47,7 @@ const DEFAULT_STATE: LgState = {
   conversations: [],
   active_conversation_id: null,
   draft_id: "",
+  canvas_lms: null,
 };
 
 let cached: LgState | null = null;
@@ -257,4 +269,33 @@ export function appendMessage(conversation_id: string, who: ChatSpeaker, text: s
       return { ...item, title, messages: [...item.messages, message] };
     }),
   });
+}
+
+function updateConversation(id: string, update: (conversation: Conversation) => Conversation) {
+  const state = readLgState();
+  writeLgState({ ...state, conversations: state.conversations.map((item) => (item.id === id ? update(item) : item)) });
+}
+
+export function setCanvasLmsInfo(info: CanvasLmsInfo) {
+  writeLgState({ ...readLgState(), canvas_lms: info });
+}
+
+// Opening an assignment from Canvas LMS starts a fresh chat about it, named after it.
+export function startCanvasLmsAssignmentChat(assignment: CanvasLmsAssignment): string {
+  const id = startConversation();
+  updateConversation(id, (item) => ({ ...item, title: assignment.title.slice(0, TITLE_MAX), canvas_lms_assignment: assignment }));
+  return id;
+}
+
+export function markCanvasLmsTurnedIn(conversation_id: string, turned_in_at: string) {
+  updateConversation(conversation_id, (item) =>
+    item.canvas_lms_assignment ? { ...item, canvas_lms_assignment: { ...item.canvas_lms_assignment, turned_in_at } } : item,
+  );
+}
+
+// Check my work results in the open chat, for the session summary turned in to Canvas LMS.
+export function recordWorkCheck(check: WorkCheckRecord) {
+  const conversation = getActiveConversation(readLgState());
+  if (!conversation) return;
+  updateConversation(conversation.id, (item) => ({ ...item, work_checks: [...(item.work_checks ?? []), check].slice(-30) }));
 }

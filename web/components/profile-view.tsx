@@ -9,11 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  type CanvasLmsLaunch,
   type CanvasLmsStatus,
   addCanvasLmsCalendarFeed,
   canvasLmsStatus,
-  claimCanvasLmsLaunch,
   connectCanvasLms,
   disconnectCanvasLms,
   importCanvasLmsProfile,
@@ -21,7 +19,7 @@ import {
   removeCanvasLmsCalendarFeed,
 } from "@/lib/lg-canvas-lms";
 import { updateProfile, useLgState } from "@/lib/lg-store";
-import { LANGUAGE_OPTIONS } from "@/lib/lg-types";
+import { type CanvasLmsInfo, LANGUAGE_OPTIONS } from "@/lib/lg-types";
 
 const RETURN_MESSAGES: Record<string, string> = {
   denied: "Canvas LMS access wasn't allowed, so nothing was imported.",
@@ -33,32 +31,70 @@ function importedMessage() {
   return `Imported from Canvas LMS at ${time}.`;
 }
 
-function launchMessage(launch: CanvasLmsLaunch) {
-  const course = [launch.course, launch.course_code && `(${launch.course_code})`].filter(Boolean).join(" ");
-  const parts = [launch.name && `Signed in to Canvas LMS as ${launch.name}`, course && `opened from ${course}`];
-  const opened = parts.filter(Boolean).join(", ") || "Opened from Canvas LMS";
-  return launch.assignment_title ? `${opened}, for "${launch.assignment_title}".` : `${opened}.`;
-}
-
 function feedMessage(count: number) {
   return `Calendar feed imported: ${count} ${count === 1 ? "event" : "events"} read. ${importedMessage()}`;
 }
 
+function courseDates(start: string, end: string) {
+  const day = (value: string) => {
+    const date = value ? new Date(value) : null;
+    return date && !Number.isNaN(date.getTime())
+      ? date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+      : "";
+  };
+  const [from, to] = [day(start), day(end)];
+  return from && to ? `${from} – ${to}` : from ? `Starts ${from}` : to ? `Ends ${to}` : "";
+}
+
+// What Canvas LMS said at the student's last launch: who they are there, and their courses.
+function CanvasLmsLinked({ info }: { info: CanvasLmsInfo }) {
+  const role = [info.roles.join(", "), info.enrollment_state].filter(Boolean).join(" · ");
+  return (
+    <div className="grid gap-3 rounded-lg border p-3">
+      <div className="flex items-center gap-3">
+        {info.photo_url ? (
+          // eslint-disable-next-line @next/next/no-img-element -- Canvas LMS avatars come from its own CDN.
+          <img src={info.photo_url} alt="" referrerPolicy="no-referrer" className="size-10 rounded-full" />
+        ) : null}
+        <div className="min-w-0 text-sm">
+          <p className="truncate font-medium">{info.name || "Canvas LMS student"}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {[info.school, role].filter(Boolean).join(" · ") || "Linked from Canvas LMS"}
+          </p>
+        </div>
+      </div>
+      {info.courses.length > 0 && (
+        <ul className="grid gap-1.5 text-sm">
+          {info.courses.map((course) => (
+            <li key={course.name}>
+              <span className="font-medium">{course.name}</span>
+              {course.code && <span className="text-muted-foreground"> ({course.code})</span>}
+              <span className="block text-xs text-muted-foreground">
+                {[course.sections.join(", "), courseDates(course.start_at, course.end_at)].filter(Boolean).join(" · ")}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Last opened from Canvas LMS{" "}
+        {new Date(info.linked_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}.
+      </p>
+    </div>
+  );
+}
+
 function CanvasLmsCard() {
+  const { canvas_lms } = useLgState();
   const router = useRouter();
   const searchParams = useSearchParams();
   // Read once: the query is dropped right away so a reload doesn't import again.
   const [returned] = useState(() => searchParams.get("canvas_lms"));
-  const [launchCode] = useState(() => searchParams.get("canvas_lms_launch"));
   const [status, setStatus] = useState<CanvasLmsStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [feedUrl, setFeedUrl] = useState("");
   const [message, setMessage] = useState(
-    launchCode
-      ? "Reading what Canvas LMS sent…"
-      : returned === "connected"
-        ? "Importing from Canvas LMS…"
-        : (RETURN_MESSAGES[returned ?? ""] ?? ""),
+    returned === "connected" ? "Importing from Canvas LMS…" : (RETURN_MESSAGES[returned ?? ""] ?? ""),
   );
   const started = useRef(false);
 
@@ -71,22 +107,14 @@ function CanvasLmsCard() {
     setMessage(result.ok ? importedMessage() : result.message);
   }, []);
 
-  const showLaunch = useCallback((result: Awaited<ReturnType<typeof claimCanvasLmsLaunch>>) => {
-    setMessage(result.ok ? launchMessage(result.value) : result.message);
-  }, []);
-
   useEffect(() => {
     if (started.current) return; // Strict Mode runs effects twice in development.
     started.current = true;
-    if (returned || launchCode) router.replace("/profile");
-    // Opened from a Canvas LMS course, or back from Canvas LMS OAuth: import straight away.
-    const first = launchCode
-      ? claimCanvasLmsLaunch(launchCode).then(showLaunch)
-      : returned === "connected"
-        ? importCanvasLmsProfile().then(showImport)
-        : Promise.resolve();
+    if (returned) router.replace("/profile");
+    // Back from Canvas LMS OAuth: import straight away.
+    const first = returned === "connected" ? importCanvasLmsProfile().then(showImport) : Promise.resolve();
     void first.then(canvasLmsStatus).then(showStatus);
-  }, [returned, launchCode, router, showImport, showLaunch, showStatus]);
+  }, [returned, router, showImport, showStatus]);
 
   async function run(work: () => Promise<string>) {
     setBusy(true);
@@ -145,6 +173,7 @@ function CanvasLmsCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-5">
+        {canvas_lms && <CanvasLmsLinked info={canvas_lms} />}
         {status?.lti_ready && (
           <div className="grid gap-1">
             <p className="text-sm font-medium">Open from your course</p>

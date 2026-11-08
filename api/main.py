@@ -22,7 +22,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 import canvas_lms
 import canvas_lms_feed
+import canvas_lms_grades
 import canvas_lms_lti
+from canvas_lms_grades import TurnInError, TurnInResult, TurnInSummary
 from canvas_lms_feed import CalendarFeedError, CalendarFeedImport
 from canvas_lms_lti import CanvasLmsLaunch, LtiConfigError, LtiError
 from auth import require_user
@@ -202,14 +204,15 @@ async def post_lti_launch(request: Request) -> Response:
     except LtiError as error:
         log.info("rejected lti launch: %s", error)
         return HTMLResponse(lti_error_page(str(error)), status_code=401)
-    code = canvas_lms_lti.hand_off(canvas_lms_lti.launch_data(fields))
-    return RedirectResponse(f"{WEB_BASE_URL}/profile?{urlencode({'canvas_lms_launch': code})}", status_code=303)
+    code = canvas_lms_lti.hand_off(canvas_lms_lti.launch_data(fields), canvas_lms_lti.outcome_of(fields))
+    # The web app's launch page claims it after Auth0 login, then opens the board or the profile.
+    return RedirectResponse(f"{WEB_BASE_URL}/canvas-lms/launch?{urlencode({'code': code})}", status_code=303)
 
 
 @app.post("/canvas-lms/launch/claim")
 def post_canvas_lms_launch_claim(user: User, code: Annotated[str, Body(embed=True, max_length=100)]) -> CanvasLmsLaunch:
     """The logged-in student collects what Canvas LMS sent at launch. Each code works once."""
-    launch = canvas_lms_lti.claim(code)
+    launch = canvas_lms_lti.claim(code, user)
     if not launch:
         raise HTTPException(404, "That Canvas LMS launch expired. Open Learning Grounds from Canvas LMS again.")
     return launch
@@ -245,3 +248,25 @@ async def get_canvas_lms_calendar_feed(user: User) -> CalendarFeedImport:
 def post_canvas_lms_calendar_feed_remove(user: User) -> dict[str, bool]:
     canvas_lms_feed.delete_url(user)
     return {"calendar_feed": False}
+
+
+# --- Canvas LMS: turn in a session ------------------------------------------------------------------
+
+
+@app.post("/canvas-lms/turn-in/preview")
+def post_canvas_lms_turn_in_preview(user: User, summary: TurnInSummary) -> dict[str, str]:
+    """Exactly what the teacher will see, so the student can read it before sending."""
+    row = canvas_lms_grades._load(user, summary.turn_in_id)
+    if not row:
+        raise HTTPException(409, "Open this assignment from Canvas LMS again to turn it in.")
+    return {"html": canvas_lms_grades.summary_html(row[2], summary), "score": canvas_lms_grades.COMPLETION_SCORE}
+
+
+@app.post("/canvas-lms/turn-in")
+async def post_canvas_lms_turn_in(user: User, summary: TurnInSummary) -> TurnInResult:
+    try:
+        return await canvas_lms_grades.turn_in(user, summary)
+    except LtiConfigError as error:
+        raise HTTPException(503, str(error)) from error
+    except TurnInError as error:
+        raise HTTPException(502, str(error)) from error

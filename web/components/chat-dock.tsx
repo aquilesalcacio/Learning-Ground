@@ -3,6 +3,7 @@
 import { ChevronDown, Mic, MicOff, Send, Square } from "lucide-react";
 import { type FormEvent, useEffect, useEffectEvent, useRef, useState } from "react";
 import { BoardTools } from "@/components/board-tools";
+import { CanvasLmsAssignmentBar } from "@/components/canvas-lms-assignment-bar";
 import { TutorSwitcher } from "@/components/tutor-switcher";
 import { UploadDialog } from "@/components/upload-dialog";
 import { Button } from "@/components/ui/button";
@@ -114,6 +115,9 @@ function Dock({ state, boardId }: { state: LgState; boardId: string }) {
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-2 p-3">
+      {conversation?.canvas_lms_assignment && (
+        <CanvasLmsAssignmentBar key={conversation.id} conversation={conversation} tutorName={tutor.name} />
+      )}
       {messages.length > 0 && (
         <div className="pointer-events-auto w-full max-w-2xl">
           {transcriptOpen ? (

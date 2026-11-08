@@ -67,6 +67,41 @@ export type ChatMessage = {
   text: string;
 };
 
+// The Canvas LMS assignment a chat was opened for (an LTI launch from the assignment).
+export type CanvasLmsAssignment = {
+  title: string;
+  course: string;
+  course_code: string;
+  // The module item's title in Canvas LMS, e.g. "Unit 3: Fractions practice".
+  link_title: string;
+  due_at: string;
+  due_label: string;
+  points: string;
+  attempts_used: string;
+  attempts_allowed: string;
+  // Plain text from the assignment's description. Goes to the tutor as data, never as instructions.
+  instructions: string;
+  // Empty when Canvas LMS gave no way to send work back (a teacher's launch, or an ungraded link).
+  turn_in_id: string;
+  turned_in_at: string;
+};
+
+export type WorkCheckStatus = "correct" | "incomplete" | "error" | "blank" | "unreadable";
+export type WorkCheckRecord = { label: string; status: WorkCheckStatus };
+
+export type CanvasLmsCourse = { name: string; code: string; sections: string[]; start_at: string; end_at: string };
+
+// What Canvas LMS said about the student at their last launch. Shown on the profile, not sent to the tutor.
+export type CanvasLmsInfo = {
+  name: string;
+  photo_url: string;
+  roles: string[];
+  enrollment_state: string;
+  school: string;
+  courses: CanvasLmsCourse[];
+  linked_at: number;
+};
+
 // One run of the board with one tutor, with its own homework. The left sidebar lists these.
 export type Conversation = {
   id: string;
@@ -75,6 +110,9 @@ export type Conversation = {
   created_at: number;
   messages: ChatMessage[];
   document: LgDocument | null;
+  canvas_lms_assignment?: CanvasLmsAssignment | null;
+  // Check my work results in this chat, for the summary turned in to Canvas LMS.
+  work_checks?: WorkCheckRecord[];
 };
 
 export type Option<T extends string> = { value: T; label: string };
