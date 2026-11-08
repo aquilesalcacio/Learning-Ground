@@ -37,9 +37,14 @@ const components: TLComponents = {
 // The tutor's equations. Boards saved with one need this util to load, so it stays registered.
 const shapeUtils: TLAnyShapeUtilConstructor[] = [LgMathShapeUtil];
 
-// tldraw needs a license key on any domain but localhost. It's public by design: tldraw ties it to
-// our domain. Without it, a deployed board shows tldraw's licence notice.
-const licenseKey = process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY || undefined;
+// tldraw needs a license key on any domain but localhost. Without a valid one, tldraw 5 hides the
+// whole board five seconds after it loads. The key is public by design: it ships in the browser
+// bundle. This is our trial key (any domain, until 2027-02-16). A key set in the environment wins,
+// unless it isn't a real tldraw key, such as the template's YOUR_TLDRAW_KEY placeholder.
+const TLDRAW_TRIAL_LICENSE_KEY =
+  "tldraw-2027-02-16/WyJ2YVZYOHRxZiIsWyIqIl0sMTYsIjIwMjctMDItMTYiXQ.kJ3JueDfvp7XEwg9PBT2IHTxkf5wuPC1fVJ+4IogLK96i4CU5+731tSqCILEtnjwEM2Nk3Cthp9pcLtqG8eW6w";
+const envLicenseKey = process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY?.trim();
+const licenseKey = envLicenseKey?.startsWith("tldraw-") ? envLicenseKey : TLDRAW_TRIAL_LICENSE_KEY;
 
 // tldraw only appears here and in lib/lg-actions.ts, which keeps a library switch contained.
 // Each chat saves its own board in the browser, under its own key.
