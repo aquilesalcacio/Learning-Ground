@@ -58,32 +58,6 @@ export const TUTOR_PALETTES: Record<TutorColor, TutorPalette> = {
   },
 };
 
-export type LinearRgb = [number, number, number];
-
-// "oklch(L C H)" to linear sRGB, clamped to the screen's range. The orb's shader mixes in linear light.
-export function oklchToLinearRgb(value: string): LinearRgb {
-  const match = /oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)/.exec(value);
-  if (!match) return [0.5, 0.5, 0.5];
-  const [lightness, chroma, hueDegrees] = match.slice(1).map(Number);
-  const hue = (hueDegrees * Math.PI) / 180;
-  const a = chroma * Math.cos(hue);
-  const b = chroma * Math.sin(hue);
-  const l = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3;
-  const m = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3;
-  const s = (lightness - 0.0894841775 * a - 1.291485548 * b) ** 3;
-  const clamp = (channel: number) => Math.min(Math.max(channel, 0), 1);
-  return [
-    clamp(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
-    clamp(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
-    clamp(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s),
-  ];
-}
-
-export function paletteRgb(color: TutorColor): [LinearRgb, LinearRgb, LinearRgb] {
-  const palette = TUTOR_PALETTES[color];
-  return [oklchToLinearRgb(palette.c1), oklchToLinearRgb(palette.c2), oklchToLinearRgb(palette.c3)];
-}
-
 // The CSS variables an element needs to take on a tutor's colours. Pair with the
 // tutor-theme utility so a change of tutor fades smoothly instead of snapping.
 export function paletteVars(color: TutorColor): CSSProperties {

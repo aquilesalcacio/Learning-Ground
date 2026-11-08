@@ -284,6 +284,89 @@
   }
 }
 
+/*
+  The tutor orb (components/tutor-orb.tsx), adapted from the 21st.dev Siri orb (docs/design/21st/siri-orb.tsx).
+  A perfect circle of turning colour. The component's draw loop sets --orb-angle, --orb-scale and
+  --orb-glow, so what the tutor is doing changes how fast it turns, how big it is and how much it glows.
+  Sizes come from the orb's own width (cqi), so the hero and the docked orb both look right.
+*/
+@property --orb-angle {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+
+.tutor-orb-frame {
+  container-type: size;
+  transform: scale(var(--orb-scale, 1));
+}
+
+.tutor-orb-halo {
+  position: absolute;
+  inset: -6%;
+  border-radius: 50%;
+  background: conic-gradient(
+    from var(--orb-angle),
+    var(--tutor-c1),
+    var(--tutor-c2),
+    var(--tutor-c3),
+    var(--tutor-c1)
+  );
+  filter: blur(max(9cqi, 8px));
+  opacity: calc(0.28 + var(--orb-glow, 0) * 0.45);
+  transform: scale(calc(0.92 + var(--orb-glow, 0) * 0.22));
+}
+
+.tutor-orb {
+  --orb-bg: color-mix(in oklch, var(--tutor-c2) 8%, oklch(0.985 0.004 80));
+  --orb-blur: max(1.5cqi, 3px);
+  --orb-dot: max(0.8cqi, 0.4px);
+  --orb-shadow: max(0.8cqi, 2px);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-areas: "stack";
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--orb-bg);
+  box-shadow:
+    0 1px 2px oklch(0.3 0.02 60 / 0.08),
+    0 10px 30px -12px color-mix(in oklch, var(--tutor-c1) 60%, transparent);
+}
+
+.tutor-orb::before,
+.tutor-orb::after {
+  content: "";
+  display: block;
+  grid-area: stack;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+
+.tutor-orb::before {
+  background:
+    conic-gradient(from calc(var(--orb-angle) * 2) at 25% 70%, var(--tutor-c3), transparent 20% 80%, var(--tutor-c3)),
+    conic-gradient(from calc(var(--orb-angle) * 2) at 45% 75%, var(--tutor-c2), transparent 30% 60%, var(--tutor-c2)),
+    conic-gradient(from calc(var(--orb-angle) * -3) at 80% 20%, var(--tutor-c1), transparent 40% 60%, var(--tutor-c1)),
+    conic-gradient(from calc(var(--orb-angle) * 2) at 15% 5%, var(--tutor-c2), transparent 10% 90%, var(--tutor-c2)),
+    conic-gradient(from calc(var(--orb-angle) * 1) at 20% 80%, var(--tutor-c1), transparent 10% 90%, var(--tutor-c1)),
+    conic-gradient(from calc(var(--orb-angle) * -2) at 85% 10%, var(--tutor-c3), transparent 20% 80%, var(--tutor-c3));
+  box-shadow: inset var(--orb-bg) 0 0 var(--orb-shadow) calc(var(--orb-shadow) * 0.2);
+  filter: blur(var(--orb-blur)) contrast(calc(1.6 + var(--orb-glow, 0) * 0.3))
+    brightness(calc(1 + var(--orb-glow, 0) * 0.08));
+}
+
+/* A fine dot texture and soft gloss over the colour. */
+.tutor-orb::after {
+  background-image: radial-gradient(circle at center, var(--orb-bg) var(--orb-dot), transparent var(--orb-dot));
+  background-size: calc(var(--orb-dot) * 2) calc(var(--orb-dot) * 2);
+  backdrop-filter: blur(calc(var(--orb-blur) * 2)) contrast(3.2);
+  -webkit-backdrop-filter: blur(calc(var(--orb-blur) * 2)) contrast(3.2);
+  mask-image: radial-gradient(black 20%, transparent 75%);
+  mix-blend-mode: overlay;
+}
+
 /* Homework pages look like paper lying on the dot grid. */
 .tl-shape[data-shape-type="image"] {
   filter: drop-shadow(0 1px 1px oklch(0.3 0.02 60 / 0.1)) drop-shadow(0 12px 28px oklch(0.3 0.03 60 / 0.14));
