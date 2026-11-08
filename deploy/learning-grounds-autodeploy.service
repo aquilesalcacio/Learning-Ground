@@ -1,0 +1,11 @@
+# Deploys Learning Grounds when GitHub's main moves. Started by learning-grounds-autodeploy.timer.
+# Install: docs/DEPLOY.md, "Deploying on every push". Logs: journalctl -u learning-grounds-autodeploy
+[Unit]
+Description=Deploy Learning Grounds when GitHub's main moves
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/learning-grounds/deploy/autodeploy.sh
+TimeoutStartSec=20min

@@ -1,0 +1,11 @@
+# Checks GitHub for a new main every 2 minutes. A check that finds nothing new takes about a second.
+# Pause with: systemctl stop learning-grounds-autodeploy.timer
+[Unit]
+Description=Check GitHub for Learning Grounds updates every 2 minutes
+
+[Timer]
+OnCalendar=*:0/2
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

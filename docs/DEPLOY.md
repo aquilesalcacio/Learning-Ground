@@ -120,7 +120,30 @@ From then on, every web build talking to the agent must be one that gets credent
 
 ## Redeploying
 
-Push to `main`, then run `ssh root@187.77.50.15 /opt/learning-grounds/deploy/deploy.sh`. Run `uv run scripts/elevenlabs_setup.py agent --auth` from `api/` again after changing `api/voice/tools.json`, and redeploy at the same time.
+The server deploys every push to `main` on its own, within about 2 minutes (see below). To deploy by hand, run `/opt/learning-grounds/deploy/deploy.sh` on the server. Either way, a build that fails leaves the running version up, and students stay logged in.
+
+Some changes need one more step:
+
+| What changed | Also do |
+|---|---|
+| A key or setting, including the `NEXT_PUBLIC_` values | Send `.env.api` or `.env.web` again (step 3), then run `deploy.sh` |
+| `api/voice/tools.json` | Run `uv run scripts/elevenlabs_setup.py agent --auth` from `api/`, at the same time as the deploy |
+| `deploy/nginx.conf` | Run `python3 /opt/learning-grounds/deploy/nginx_site.py install <domain>` after the deploy |
+
+### Deploying on every push
+
+A systemd timer runs `deploy/autodeploy.sh` every 2 minutes. When `main` on GitHub has moved past what the server has, it runs `deploy.sh`. It doesn't retry a failed deploy until the next push, so a broken build isn't rebuilt over and over next to tagmephotos. `deploy.sh` takes a lock, so a manual deploy and the timer wait for each other. Since every push to `main` goes live, keep `main` working, and do unfinished work on other branches.
+
+Install it once, on the server:
+
+```bash
+cp /opt/learning-grounds/deploy/learning-grounds-autodeploy.{service,timer} /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now learning-grounds-autodeploy.timer
+```
+
+- **See what it did:** `journalctl -u learning-grounds-autodeploy -n 50 --no-pager`
+- **Pause it:** `systemctl stop learning-grounds-autodeploy.timer` (`start` to resume)
+- **Turn it off:** `systemctl disable --now learning-grounds-autodeploy.timer`
 
 ## When something goes wrong
 

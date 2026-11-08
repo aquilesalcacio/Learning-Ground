@@ -5,6 +5,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# One deploy at a time: a manual run and the autodeploy timer wait for each other.
+exec 9>/run/lock/learning-grounds-deploy.lock
+flock 9
+
 for file in .env.api .env.web; do
   if [[ ! -s $file ]]; then
     echo "deploy/$file is missing. Copy it from your laptop first (docs/DEPLOY.md, step 3)." >&2
