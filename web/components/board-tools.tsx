@@ -5,6 +5,7 @@ import {
   Eraser,
   Hand,
   Highlighter,
+  Lasso,
   type LucideIcon,
   MousePointer2,
   Pencil,
@@ -39,6 +40,7 @@ const TOOLS: { tool: LgTool; label: string; icon: LucideIcon }[] = [
   { tool: "text", label: "Text", icon: Type },
   { tool: "arrow", label: "Arrow", icon: ArrowUpRight },
   { tool: "laser", label: "Laser pointer", icon: Highlighter },
+  { tool: "lg-point", label: "Show the tutor", icon: Lasso },
 ];
 
 // The pencil button on the left of the chat bar. Everything the board needs lives

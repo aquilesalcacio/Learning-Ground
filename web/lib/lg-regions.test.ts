@@ -17,6 +17,7 @@ const {
   placeNewFile,
   pageRegions,
   problemLabel,
+  regionAt,
   regionBounds,
   regionWorkBounds,
   replacePageRegions,
@@ -197,4 +198,23 @@ test("files: homework saved as one file, and each page's reading-cache key", () 
   };
   assert.deepEqual(pageSource(two, two.pages[1]), { hash: "def", page: 1 });
   assert.equal(fileNames(documentFiles(two)), "sheet.pdf, photo.png");
+});
+
+test("the region at a point: its printed box first, then the space under it, never the margin", () => {
+  const document = documentWith(
+    [{ w: 1000, h: 1000 }],
+    [
+      { region_id: "p1.q1", label: "Problem 1", page: 1, box_2d: [100, 50, 200, 450], text: "" },
+      { region_id: "p1.q2", label: "Problem 2", page: 1, box_2d: [100, 550, 200, 950], text: "" },
+      { region_id: "p1.q3", label: "Problem 3", page: 1, box_2d: [500, 50, 600, 950], text: "" },
+    ],
+  );
+  // Side by side, both working areas cross the page: the printed box decides.
+  assert.equal(regionAt(document, { x: 700, y: 150 })?.region_id, "p1.q2");
+  assert.equal(regionAt(document, { x: 100, y: 150 })?.region_id, "p1.q1");
+  // Under problem 3, where the student works it.
+  assert.equal(regionAt(document, { x: 500, y: 800 })?.region_id, "p1.q3");
+  // The margin beside the page belongs to no problem.
+  assert.equal(regionAt(document, { x: 1100, y: 550 }), undefined);
+  assert.equal(regionAt(null, { x: 100, y: 150 }), undefined);
 });

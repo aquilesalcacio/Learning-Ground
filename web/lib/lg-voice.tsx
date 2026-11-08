@@ -15,11 +15,26 @@ import { checkStudentWork, type WorkCheck, type WorkCheckOutcome, workReport } f
 import { apiErrorMessage } from "./lg-document";
 import { parseNumber, parseNumberLineMarks, type ShapeKind } from "./lg-ink";
 import { runStudentProgress } from "./lg-progress-run";
-import { getActiveConversation, getActiveDocument, getBoardQuestions, readLgState } from "./lg-store";
+import { findRegion } from "./lg-regions";
+import {
+  findBoardQuestion,
+  getActiveConversation,
+  getActiveDocument,
+  getBoardQuestions,
+  getBoardSelections,
+  type LgState,
+  readLgState,
+} from "./lg-store";
 import { penInterrupted, setPenVoice } from "./lg-tutor-pen";
-import { buildTutorPrompt, type LgHomeworkContext, resolveLanguage, toneVoiceSettings } from "./lg-tutor-prompt";
+import {
+  buildTutorPrompt,
+  type LgHomeworkContext,
+  type LgSelectionContext,
+  resolveLanguage,
+  toneVoiceSettings,
+} from "./lg-tutor-prompt";
 import { findVoice } from "./lg-voices";
-import type { ChatSpeaker, LgDocument, Tutor } from "./lg-types";
+import type { ChatSpeaker, LgBoardSelection, LgDocument, Tutor } from "./lg-types";
 
 const SILENT_TURN = /^[\s.…]*$/;
 
@@ -148,6 +163,19 @@ export function homeworkContext(document: LgDocument | null): LgHomeworkContext 
   return { filename: document.filename, regions };
 }
 
+// A spot the student circled, as the tutor sees it: its ID and the region or question it's on.
+// has_work, when given, says whether any of the student's writing is inside it.
+export function selectionContext(state: LgState, selection: LgBoardSelection, has_work?: boolean): LgSelectionContext {
+  const question = selection.question_id ? findBoardQuestion(state, selection.question_id) : undefined;
+  const region = selection.region_id ? findRegion(getActiveDocument(state), selection.region_id) : undefined;
+  const on = question
+    ? { id: question.id, label: `Question ${question.id.slice(1)}` }
+    : region
+      ? { id: region.region_id, label: region.label }
+      : null;
+  return { id: selection.id, on, ...(has_work === undefined ? {} : { has_work }) };
+}
+
 // Each session starts from a one-time credential that our API gets from ElevenLabs (T-203). The agent
 // requires auth, so its ID alone starts nothing, and the API key never reaches the browser.
 // A voice call gets a conversation token (WebRTC), a text chat a signed URL (WebSocket).
@@ -185,6 +213,7 @@ function sessionOptions({ tutor, textOnly }: SessionRequest, credential: Session
     homeworkContext(getActiveDocument(state)),
     getActiveConversation(state)?.canvas_lms_assignment ?? null,
     getBoardQuestions(state).map(({ id, text: question }) => ({ id, text: question })),
+    getBoardSelections(state).map((selection) => selectionContext(state, selection)),
   );
   return {
     ...credential,
@@ -395,6 +424,14 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
     return true;
   }
 
+  // Background information that must reach the tutor, sent now or as soon as the next session
+  // opens, ahead of whatever waits in sendWhenReady. Unlike sendContextualUpdate, it's kept when
+  // there's no session yet, for one about to start.
+  function sendContextWhenReady(message: string) {
+    if (connected) conversation.sendContextualUpdate(message);
+    else pendingContext.current.push(message);
+  }
+
   const end = useCallback(() => {
     attempt.current += 1;
     restart.current = null;
@@ -419,6 +456,7 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
     end,
     sendWhenReady,
     sendContextualUpdate,
+    sendContextWhenReady,
     muted: conversation.isMuted,
     setMuted: conversation.setMuted,
   };

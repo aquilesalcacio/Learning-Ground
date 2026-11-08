@@ -17,7 +17,7 @@ import {
   toRichText,
 } from "tldraw";
 import { LG_MATH, LG_MATH_MAX, measureLgMath } from "@/components/lg-math-shape";
-import { linkLgBoard, noteLgActionTarget } from "./lg-board-link";
+import { lgSelectionBounds, linkLgBoard, noteLgActionTarget } from "./lg-board-link";
 import {
   arcAt,
   arrowEnds,
@@ -69,6 +69,7 @@ import {
   pageRegions,
   pageSource,
   placeNewFile,
+  regionAt,
   regionBounds,
   regionFocusBounds,
   regionMarginX,
@@ -77,16 +78,21 @@ import {
   wholePageRegion,
 } from "./lg-regions";
 import { LgDocumentError, openHomeworkFile, readHomeworkPage } from "./lg-document";
+import { selectionOwner } from "./lg-selection";
 import {
   addBoardQuestion,
+  addBoardSelection,
   appendMessage,
   clearBoardQuestions,
+  clearBoardSelections,
   findBoardQuestion,
+  findBoardSelection,
   getActiveDocument,
   getActiveTutor,
   getBoardQuestions,
   getConversationDocument,
   readLgState,
+  removeBoardSelections,
   setConversationDocument,
   setLgDocument,
   startConversation,
@@ -110,9 +116,9 @@ import {
 // Each action becomes a plan for the tutor's pen (lg-tutor-pen.ts), which draws it by hand while
 // the tutor talks: it travels to the problem, then inks the mark stroke by stroke. Tutor marks
 // stay out of the undo history, so the student's undo only ever takes their own work.
-// Actions aim at a homework region (p1.q3) or at a question the tutor wrote on the board (q1),
-// so the tutor can teach on a blank board too. Graphs and shapes stand on their own, so they can
-// also go on a free spot of the board.
+// Actions aim at a homework region (p1.q3), at a question the tutor wrote on the board (q1), so
+// the tutor can teach on a blank board too, or at a spot the student circled to show it (s1).
+// Graphs and shapes stand on their own, so they can also go on a free spot of the board.
 export type LgAction =
   | { type: "focus_region"; region_id: string }
   | { type: "point_at"; region_id: string }
@@ -186,6 +192,9 @@ const exists = (editor: Editor, id: TLShapeId) => !!editor.getShape(id);
 // What the tutor's tools aim at, in board positions.
 type LgTarget = {
   id: string;
+  // What notes about it are filed under (meta.near), so they stack below the others there. A
+  // circled spot's notes go with the region or question it's on.
+  near: string;
   // The problem as printed, or the question's note. Circles, underlines and arrows use this.
   bounds: LgBounds;
   // What the board frames to show it, with room for notes.
@@ -203,6 +212,7 @@ function resolveTarget(document: LgDocument | null, id: string): LgTarget | null
     const bounds = regionBounds(document, item);
     return {
       id,
+      near: id,
       bounds,
       focus: regionFocusBounds(document, item),
       marginX: regionMarginX(document, item),
@@ -211,16 +221,49 @@ function resolveTarget(document: LgDocument | null, id: string): LgTarget | null
     };
   }
   const question = findBoardQuestion(readLgState(), id);
-  if (!question) return null;
+  if (!question) return selectionTarget(document, id);
   const all = Box.Common([Box.From(question.card), Box.From(question.answer)]);
   // Notes about a written question go under its answer box, in the same column.
   return {
     id,
+    near: id,
     bounds: question.card,
     focus: { x: all.x - 48, y: all.y - 24, w: all.w + 96, h: all.h + 48 + NOTE_LINE_HEIGHT * 4 },
     marginX: question.card.x,
     top: question.card.y,
     work: question.answer,
+  };
+}
+
+// A spot the student circled: where its loop is now, which moves with its file. Notes about it go
+// in the margin of the region or question it's on, beside the spot or below the notes already
+// there; on a blank board, just right of it.
+function selectionTarget(document: LgDocument | null, id: string): LgTarget | null {
+  const selection = findBoardSelection(readLgState(), id);
+  const bounds = selection && lgSelectionBounds(id);
+  if (!selection || !bounds) return null;
+  const parentId = selection.question_id ?? selection.region_id;
+  const parent = parentId ? resolveTarget(document, parentId) : null;
+  const shown = Box.From(bounds).expandBy(24);
+  if (parent) {
+    return {
+      id,
+      near: parent.near,
+      bounds,
+      focus: Box.Common([Box.From(parent.focus), shown]).toJson(),
+      marginX: parent.marginX,
+      top: Math.max(parent.top, bounds.y),
+      work: bounds,
+    };
+  }
+  return {
+    id,
+    near: id,
+    bounds,
+    focus: { x: shown.x, y: shown.y, w: shown.w + 32 + MARGIN_WIDTH, h: shown.h + NOTE_LINE_HEIGHT * 4 },
+    marginX: bounds.x + bounds.w + 32,
+    top: bounds.y,
+    work: bounds,
   };
 }
 
@@ -354,7 +397,7 @@ function inkStep(editor: Editor, kind: "draw" | "highlight", source: () => InkPo
 function nextNoteY(editor: Editor, target: LgTarget): number {
   return editor
     .getCurrentPageShapes()
-    .filter((shape) => shape.meta.author === "tutor" && (shape.meta.near === target.id || shape.meta.question === target.id))
+    .filter((shape) => shape.meta.author === "tutor" && (shape.meta.near === target.near || shape.meta.question === target.near))
     .reduce((next, shape) => Math.max(next, (editor.getShapePageBounds(shape)?.maxY ?? 0) + MARGIN_LINE_GAP), target.top);
 }
 
@@ -422,7 +465,7 @@ function textStep(
 
 function noteSteps(editor: Editor, target: LgTarget, text: string, font: "draw" | "mono"): PenStep[] {
   const place = (): TextPlace => ({ x: target.marginX, y: nextNoteY(editor, target), w: MARGIN_WIDTH, align: "start" });
-  return [revealTarget(editor, target), textStep(editor, place, text, { near: target.id, font }), penRestStep()];
+  return [revealTarget(editor, target), textStep(editor, place, text, { near: target.near, font }), penRestStep()];
 }
 
 // A hint equation, rendered with KaTeX and revealed left to right as the pen writes along it.
@@ -448,7 +491,7 @@ function mathSteps(editor: Editor, target: LgTarget, latex: string): PenStep[] {
           type: LG_MATH,
           x: spot.x,
           y: spot.y,
-          meta: tutorMeta(target.id),
+          meta: tutorMeta(target.near),
           props: { latex: source, w: size.w, h: size.h, color: tutorColor(), reveal: 0 },
         });
       },
@@ -526,7 +569,7 @@ function numberLineSteps(editor: Editor, target: LgTarget, min: number, max: num
   // Placed once, when the axis starts, below anything already written beside the target.
   const place = () =>
     (layout ??= numberLineLayout({ x: target.marginX, y: nextNoteY(editor, target) }, MARGIN_WIDTH, min, max, marks));
-  const near = target.id;
+  const near = target.near;
   const steps: PenStep[] = [
     revealTarget(editor, target),
     inkStep(
@@ -637,7 +680,7 @@ function graphSteps(editor: Editor, target: LgTarget | null, spec: GraphSpec): P
   if (graph.note) console.warn(`[lg] plot_graph: ${graph.note}.`, spec);
   const { layout } = graph;
   const { at, box } = figurePlace(editor, target, layout.box);
-  const near = target?.id;
+  const near = target?.near;
   const axis = (ends: [InkPoint, InkPoint], ticks: { at: InkPoint }[]) => () =>
     axisStroke(at(ends[0]), at(ends[1]), ticks.map((tick) => at(tick.at)));
   const steps: PenStep[] = [
@@ -720,7 +763,7 @@ function shapeSteps(editor: Editor, target: LgTarget | null, action: Extract<LgA
     return [];
   }
   const { at, box } = figurePlace(editor, target, layout.box);
-  const near = target?.id;
+  const near = target?.near;
   const steps: PenStep[] = [revealFigure(editor, target, box)];
   for (const stroke of layout.strokes) {
     const { duration, ...ink } = SHAPE_INK[stroke.kind];
@@ -755,8 +798,8 @@ function boardConversation(): string {
   return readLgState().active_conversation_id ?? startConversation();
 }
 
-// Every tutor mark fades out together, then goes, with the tutor's written questions.
-// The student's work stays, including what they wrote in an answer box.
+// Every tutor mark fades out together, then goes, with the tutor's written questions and the
+// spots the student circled. The student's work stays, including what they wrote in an answer box.
 function clearSteps(editor: Editor): PenStep[] {
   let marks: TLShape[] = [];
   return [
@@ -764,7 +807,9 @@ function clearSteps(editor: Editor): PenStep[] {
       duration: 220,
       mode: "idle",
       begin: () => {
-        marks = editor.getCurrentPageShapes().filter((shape) => shape.meta.author === "tutor");
+        marks = editor
+          .getCurrentPageShapes()
+          .filter((shape) => shape.meta.author === "tutor" || shape.meta.kind === "selection");
       },
       frame: (t) => {
         editor.updateShapes(
@@ -776,7 +821,10 @@ function clearSteps(editor: Editor): PenStep[] {
       end: () => {
         editor.deleteShapes(marks.map((shape) => shape.id).filter((id) => exists(editor, id)));
         const conversation_id = readLgState().active_conversation_id;
-        if (conversation_id) clearBoardQuestions(conversation_id);
+        if (conversation_id) {
+          clearBoardQuestions(conversation_id);
+          clearBoardSelections(conversation_id);
+        }
       },
     },
   ];
@@ -895,7 +943,7 @@ export function askLgQuestion(question: string, near_region_id = ""): LgAskOutco
   const added = addBoardQuestion(conversation_id, (id) => ({
     id,
     text,
-    near: near?.id ?? "",
+    near: near?.near ?? "",
     card: { x: guess.x, y: guess.y, w: QUESTION_NOTE, h: QUESTION_NOTE },
     answer: { x: guess.x, y: guess.y + QUESTION_NOTE + ANSWER_TOP_GAP, w: ANSWER_W, h: ANSWER_H },
   }));
@@ -931,7 +979,7 @@ function questionSteps(editor: Editor, conversation_id: string, id: string, text
     shown = next;
     editor.updateShape({ id: noteId, type: "note", props: { richText: toRichText(next) } });
   };
-  const nearId = near?.id;
+  const nearId = near?.near;
   return [
     revealStep(editor, whole, () => {
       const box = whole();
@@ -1059,6 +1107,88 @@ function watchAnswers(editor: Editor) {
   };
 }
 
+// "Show the tutor": the student taps or circles something on the board (lg-point-tool.ts). The
+// loop stays as a draw shape in its own style, kept out of the undo history like the homework, and
+// is saved with the chat as s1, s2... so the tutor can aim at it and check what's inside.
+// It carries meta.kind, so it never counts as the student's work or starts a chat by itself.
+const SELECTION_STYLE = { color: "light-blue", dash: "dashed", size: "m", fill: "none" } as const;
+const selectionListeners = new Set<(selection_id: string) => void>();
+
+// Told when the student circles or taps something, with the spot's ID.
+export function onLgSelection(listener: (selection_id: string) => void) {
+  selectionListeners.add(listener);
+  return () => {
+    selectionListeners.delete(listener);
+  };
+}
+
+// Draws the student's loop as it grows, then closed once it's done. Returns the shape's ID.
+export function inkLgSelection(editor: Editor, id: TLShapeId | null, points: InkPoint[], done: boolean): TLShapeId {
+  const origin = points[0] ?? { x: 0, y: 0 };
+  const segments = segmentsOf(points, origin);
+  const shapeId = id ?? createShapeId();
+  editor.run(
+    () => {
+      if (!exists(editor, shapeId)) {
+        editor.createShape({
+          id: shapeId,
+          type: "draw",
+          x: origin.x,
+          y: origin.y,
+          meta: { kind: "selection" },
+          props: { ...SELECTION_STYLE, isClosed: done, segments, isComplete: done },
+        });
+      } else {
+        editor.updateShape({ id: shapeId, type: "draw", x: origin.x, y: origin.y, props: { isClosed: done, segments, isComplete: done } });
+      }
+    },
+    { history: "ignore" },
+  );
+  return shapeId;
+}
+
+export function removeLgSelectionInk(editor: Editor, id: TLShapeId) {
+  if (exists(editor, id)) editor.run(() => editor.deleteShape(id), { history: "ignore" });
+}
+
+// Loops the chat no longer lists go: past the 20 it keeps, cleared, or a loop still being drawn
+// when the board closed.
+function pruneSelectionLoops(editor: Editor, conversation_id: string | null) {
+  const listed = new Set(
+    (readLgState().conversations.find((item) => item.id === conversation_id)?.board_selections ?? []).map((item) => item.id),
+  );
+  const strays = editor
+    .getCurrentPageShapes()
+    .filter((shape) => shape.meta.kind === "selection" && !listed.has(String(shape.meta.selection_id)));
+  if (strays.length) editor.run(() => editor.deleteShapes(strays), { history: "ignore" });
+}
+
+// Saves the finished loop as the next spot, on whatever it was drawn on, and tells the listeners.
+// Circling on the start screen begins the chat, as a first stroke does. Returns the spot's ID.
+export function recordLgSelection(editor: Editor, shapeId: TLShapeId, bounds: LgBounds): string | null {
+  if (editor !== lgEditor) {
+    removeLgSelectionInk(editor, shapeId);
+    return null;
+  }
+  const state = readLgState();
+  const center = { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 };
+  const owner = selectionOwner(center, getBoardQuestions(state), regionAt(getActiveDocument(state), center)?.region_id);
+  const conversation_id = boardConversation();
+  const added = addBoardSelection(conversation_id, (id) => ({ id, bounds, ...owner, created_at: Date.now() }));
+  if (!added) {
+    removeLgSelectionInk(editor, shapeId);
+    return null;
+  }
+  editor.run(
+    () => editor.updateShape({ id: shapeId, type: "draw", meta: { kind: "selection", selection_id: added.id } }),
+    { history: "ignore" },
+  );
+  pruneSelectionLoops(editor, conversation_id);
+  noteLgActionTarget({ region_id: added.id });
+  selectionListeners.forEach((listener) => listener(added.id));
+  return added.id;
+}
+
 export function setLgPenColor(color: PenColor) {
   lgEditor?.setStyleForNextShapes(DefaultColorStyle, color);
   // Recolor an existing selection too, so picking a color after selecting works.
@@ -1069,7 +1199,8 @@ export function setLgPenColor(color: PenColor) {
 }
 
 // The tools the floating pencil menu exposes (vision doc, section 4.1).
-export const LG_TOOLS = ["select", "hand", "draw", "eraser", "text", "arrow", "laser"] as const;
+// "lg-point" is the student's Show the tutor tool (lg-point-tool.ts).
+export const LG_TOOLS = ["select", "hand", "draw", "eraser", "text", "arrow", "laser", "lg-point"] as const;
 export type LgTool = (typeof LG_TOOLS)[number];
 
 function isLgTool(id: string): id is LgTool {
@@ -1805,8 +1936,8 @@ export function endLgFileMove() {
   syncRegionShapes(editor, boardDocument());
 }
 
-// Removes one file: its pages and outlines, and the tutor's marks on it. The student's own marks
-// stay. The last file removes the homework altogether.
+// Removes one file: its pages and outlines, the tutor's marks on it and the spots circled on it.
+// The student's own marks stay. The last file removes the homework altogether.
 export function removeLgFile(fileId: string) {
   const editor = lgEditor;
   const conversation_id = lgBoardId;
@@ -1820,6 +1951,7 @@ export function removeLgFile(fileId: string) {
   const numbers = filePageNumbers(document, fileId);
   const shapes = attachedShapes(editor, document, numbers).filter((shape) => shape.meta.kind || shape.meta.author === "tutor");
   const assets = shapes.flatMap((shape) => (shape.meta.kind === "page" ? (pageAssetId(shape) ?? []) : []));
+  const circled = shapes.flatMap((shape) => (shape.meta.kind === "selection" ? String(shape.meta.selection_id) : []));
   editor.run(
     () => {
       editor.deleteShapes(shapes);
@@ -1827,6 +1959,7 @@ export function removeLgFile(fileId: string) {
     },
     { history: "ignore", ignoreShapeLock: true },
   );
+  removeBoardSelections(conversation_id, circled);
   setConversationDocument(conversation_id, (current) => {
     if (!current) return current;
     const files = documentFiles(current).filter((file) => file.id !== fileId);
@@ -1864,6 +1997,8 @@ export function bindLearningGrounds(editor: Editor, boardId: string) {
   lgEditor = editor;
   lgBoardId = boardId;
   checkSavedHomework(editor);
+  // The board saves a moment after the chat, so it can hold a loop the chat no longer lists.
+  pruneSelectionLoops(editor, boardId);
   setLgBackground("plain");
   editor.setCurrentTool("draw");
   focusLgPage(1);

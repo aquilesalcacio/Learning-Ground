@@ -4,7 +4,8 @@ import { LgApiAuthError, lgApiFetch } from "./lg-api";
 import { captureLgRegion } from "./lg-board-link";
 import { apiErrorMessage } from "./lg-document";
 import { findRegion } from "./lg-regions";
-import { findBoardQuestion, getActiveDocument, getActiveTutor, readLgState, recordWorkCheck } from "./lg-store";
+import { selectionLabel } from "./lg-selection";
+import { findBoardQuestion, findBoardSelection, getActiveDocument, getActiveTutor, readLgState, recordWorkCheck } from "./lg-store";
 
 export type WorkCheck = {
   status: "correct" | "incomplete" | "error" | "blank" | "unreadable";
@@ -28,20 +29,32 @@ function questionLabel(id: string, text: string) {
 }
 
 // One path for the button and the voice tool: snapshot the region, then ask the API about it.
-// A written question (q1) is checked by its answer box. With no homework open and no such
-// question, the whole board is checked, whatever region_id says.
+// A written question (q1) is checked by its answer box, and a spot the student circled (s1) by
+// what's inside its loop. With no homework open and no such question or spot, the whole board is
+// checked, whatever region_id says.
 export async function checkStudentWork(region_id: string): Promise<WorkCheckOutcome> {
   const state = readLgState();
   const document = getActiveDocument(state);
-  const question = findBoardQuestion(state, region_id);
-  const region = findRegion(document, region_id);
-  if (document && !region && !question) return { ok: false, message: `There's no region called ${region_id}.` };
-  const label = question ? questionLabel(question.id, question.text) : (region?.label ?? "the board");
-  const checked_id = question?.id ?? region?.region_id ?? "";
+  const selection = findBoardSelection(state, region_id);
+  // A circled spot is named after the problem or question it's on, which is also its topic.
+  const question = findBoardQuestion(state, selection ? (selection.question_id ?? "") : region_id);
+  const region = findRegion(document, selection ? (selection.region_id ?? "") : region_id);
+  if (document && !region && !question && !selection) return { ok: false, message: `There's no region called ${region_id}.` };
+  const owner = question ? questionLabel(question.id, question.text) : region?.label;
+  const label = selection ? selectionLabel(owner ?? "") : (owner ?? "the board");
+  const checked_id = selection?.id ?? question?.id ?? region?.region_id ?? "";
 
   const capture = await captureLgRegion(region_id);
   if (capture === "no_board") return { ok: false, message: "No board is open, so there's no work to check." };
   if (capture === "unknown_region") return { ok: false, message: `There's no region called ${region_id}.` };
+  if (capture === "no_work" && selection) {
+    const printed = question
+      ? " It's part of your question: explain it with a mark."
+      : region
+        ? " It's part of the problem itself: explain it with a mark."
+        : "";
+    return { ok: false, message: `The student hasn't written anything in ${label}.${printed}` };
+  }
   if (capture === "no_work") return { ok: false, message: `Nothing is written on ${label} yet.` };
 
   const form = new FormData();

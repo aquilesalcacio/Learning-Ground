@@ -11,7 +11,7 @@
         "properties": {
           "region_id": {
             "type": "string",
-            "description": "ID of a homework region exactly as listed, such as p1.q3, or of a question you wrote, such as q1."
+            "description": "ID of a homework region exactly as listed, such as p1.q3, of a question you wrote, such as q1, or of a spot the student circled, such as s1."
           }
         },
         "required": [
@@ -32,7 +32,7 @@
         "properties": {
           "region_id": {
             "type": "string",
-            "description": "ID of a homework region exactly as listed, such as p1.q3, or of a question you wrote, such as q1."
+            "description": "ID of a homework region exactly as listed, such as p1.q3, of a question you wrote, such as q1, or of a spot the student circled, such as s1."
           }
         },
         "required": [
@@ -53,7 +53,7 @@
         "properties": {
           "region_id": {
             "type": "string",
-            "description": "ID of a homework region exactly as listed, such as p1.q3, or of a question you wrote, such as q1."
+            "description": "ID of a homework region exactly as listed, such as p1.q3, of a question you wrote, such as q1, or of a spot the student circled, such as s1."
           }
         },
         "required": [
@@ -74,7 +74,7 @@
         "properties": {
           "region_id": {
             "type": "string",
-            "description": "ID of a homework region exactly as listed, such as p1.q3, or of a question you wrote, such as q1."
+            "description": "ID of a homework region exactly as listed, such as p1.q3, of a question you wrote, such as q1, or of a spot the student circled, such as s1."
           }
         },
         "required": [
@@ -95,7 +95,7 @@
         "properties": {
           "region_id": {
             "type": "string",
-            "description": "ID of a homework region exactly as listed, such as p1.q3, or of a question you wrote, such as q1."
+            "description": "ID of a homework region exactly as listed, such as p1.q3, of a question you wrote, such as q1, or of a spot the student circled, such as s1."
           }
         },
         "required": [
@@ -116,7 +116,7 @@
         "properties": {
           "from_region_id": {
             "type": "string",
-            "description": "ID the arrow starts at: a region such as p1.q3, or a question such as q1."
+            "description": "ID the arrow starts at: a region such as p1.q3, a question such as q1, or a spot the student circled, such as s1."
           },
           "to_region_id": {
             "type": "string",
@@ -146,7 +146,7 @@
         "properties": {
           "near_region_id": {
             "type": "string",
-            "description": "ID of the homework region, or of your question (such as q1), that this belongs beside."
+            "description": "ID of the homework region, of your question (such as q1), or of a spot the student circled (such as s1), that this belongs beside."
           },
           "text": {
             "type": "string",
@@ -172,7 +172,7 @@
         "properties": {
           "near_region_id": {
             "type": "string",
-            "description": "ID of the homework region, or of your question (such as q1), that this belongs beside."
+            "description": "ID of the homework region, of your question (such as q1), or of a spot the student circled (such as s1), that this belongs beside."
           },
           "latex": {
             "type": "string",
@@ -198,7 +198,7 @@
         "properties": {
           "near_region_id": {
             "type": "string",
-            "description": "ID of the homework region, or of your question (such as q1), that this belongs beside."
+            "description": "ID of the homework region, of your question (such as q1), or of a spot the student circled (such as s1), that this belongs beside."
           },
           "min": {
             "type": "number",
@@ -233,7 +233,7 @@
         "properties": {
           "near_region_id": {
             "type": "string",
-            "description": "Optional ID of the homework region, or of your question (such as q1), to draw it beside. Leave it out to draw on a free spot of the board."
+            "description": "Optional ID of the homework region, of your question (such as q1), or of a spot the student circled (such as s1), to draw it beside. Leave it out to draw on a free spot of the board."
           },
           "functions": {
             "type": "string",
@@ -280,7 +280,7 @@
         "properties": {
           "near_region_id": {
             "type": "string",
-            "description": "Optional ID of the homework region, or of your question (such as q1), to draw it beside. Leave it out to draw on a free spot of the board."
+            "description": "Optional ID of the homework region, of your question (such as q1), or of a spot the student circled (such as s1), to draw it beside. Leave it out to draw on a free spot of the board."
           },
           "shape": {
             "type": "string",
@@ -331,7 +331,7 @@
           },
           "near_region_id": {
             "type": "string",
-            "description": "Optional ID of the homework region to write it beside. Leave it out to write it on a free spot of the board."
+            "description": "Optional ID of the homework region, or of a spot the student circled (such as s1), to write it beside. Leave it out to write it on a free spot of the board."
           }
         },
         "required": [
@@ -345,7 +345,7 @@
     "tool_config": {
       "type": "client",
       "name": "read_student_work",
-      "description": "Look at what the student has written on a problem, or in the answer box of one of your questions, and get a report on whether it's right. Use it when the student asks you to check their work, or when a message says they wrote an answer. It takes a few seconds, so say you're taking a look first.",
+      "description": "Look at what the student has written on a problem, in the answer box of one of your questions, or inside a spot they circled, and get a report on whether it's right. Use it when the student asks you to check their work, or when a message says they wrote an answer or circled their work. It takes a few seconds, so say you're taking a look first.",
       "expects_response": true,
       "response_timeout_secs": 35,
       "parameters": {
@@ -353,7 +353,7 @@
         "properties": {
           "region_id": {
             "type": "string",
-            "description": "ID of a homework region exactly as listed, such as p1.q3, or of a question you wrote, such as q1."
+            "description": "ID of a homework region exactly as listed, such as p1.q3, of a question you wrote, such as q1, or of a spot the student circled, such as s1."
           }
         },
         "required": [
@@ -377,7 +377,7 @@
     "tool_config": {
       "type": "client",
       "name": "clear",
-      "description": "Remove your own marks and questions from the board. The student's work stays. Use it when moving to a different problem.",
+      "description": "Remove your own marks and questions, and the spots the student circled, from the board. The student's work stays. Use it when moving to a different problem.",
       "expects_response": false
     }
   }

@@ -153,6 +153,21 @@ export function regionWorkBounds(document: LgDocument, item: LgRegion): LgBounds
   return boxBounds(pageOf(document, item), workingBox(document.regions, item));
 }
 
+function holds(area: LgBounds, point: { x: number; y: number }) {
+  return point.x >= area.x && point.x <= area.x + area.w && point.y >= area.y && point.y <= area.y + area.h;
+}
+
+// The problem at a board point: the one printed there, or else the one whose working area holds
+// it, so writing under a problem belongs to it. Working areas cross the whole page, so for
+// problems side by side the printed box decides. The margin beside the page is no problem's.
+export function regionAt(document: LgDocument | null, point: { x: number; y: number }): LgRegion | undefined {
+  if (!document) return undefined;
+  return (
+    document.regions.find((item) => holds(regionBounds(document, item), point)) ??
+    document.regions.find((item) => holds(regionWorkBounds(document, item), point))
+  );
+}
+
 // Tutor text goes in a margin beside the page. Focus always keeps that margin on screen.
 export const MARGIN_WIDTH = 300;
 const MARGIN_GAP = 32;

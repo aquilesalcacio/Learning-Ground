@@ -8,6 +8,7 @@ import type {
   ChatSpeaker,
   Conversation,
   LgBoardQuestion,
+  LgBoardSelection,
   LgDocument,
   StudentProfile,
   Tutor,
@@ -20,6 +21,7 @@ const STORAGE_KEY = "lg-state-v1";
 
 const TITLE_MAX = 48;
 const PRACTICE_HISTORY_MAX = 10;
+const BOARD_ITEMS_MAX = 20;
 
 export type LgState = {
   tutors: Tutor[];
@@ -342,7 +344,7 @@ export function addBoardQuestion(conversation_id: string, make: (id: string) => 
   updateConversation(conversation_id, (item) => ({
     ...item,
     board_question_count: count,
-    board_questions: [...(item.board_questions ?? []), question].slice(-20),
+    board_questions: [...(item.board_questions ?? []), question].slice(-BOARD_ITEMS_MAX),
     practice_history: [...(item.practice_history ?? []), question.text].slice(-PRACTICE_HISTORY_MAX),
   }));
   return question;
@@ -358,4 +360,41 @@ export function updateBoardQuestion(conversation_id: string, id: string, patch: 
 // The tutor cleared its marks, so its questions are gone from the board too.
 export function clearBoardQuestions(conversation_id: string) {
   updateConversation(conversation_id, (item) => (item.board_questions?.length ? { ...item, board_questions: [] } : item));
+}
+
+// Spots the student circled on the open chat's board (lg-actions.ts saves them).
+export function getBoardSelections(state: LgState): LgBoardSelection[] {
+  return getActiveConversation(state)?.board_selections ?? [];
+}
+
+export function findBoardSelection(state: LgState, id: string): LgBoardSelection | undefined {
+  return getBoardSelections(state).find((selection) => selection.id === id);
+}
+
+// Adds a circled spot under the next free ID (s1, s2, ...) and returns it. The oldest go past 20.
+export function addBoardSelection(conversation_id: string, make: (id: string) => LgBoardSelection): LgBoardSelection | null {
+  const conversation = readLgState().conversations.find((item) => item.id === conversation_id);
+  if (!conversation) return null;
+  const count = (conversation.board_selection_count ?? 0) + 1;
+  const selection = make(`s${count}`);
+  updateConversation(conversation_id, (item) => ({
+    ...item,
+    board_selection_count: count,
+    board_selections: [...(item.board_selections ?? []), selection].slice(-BOARD_ITEMS_MAX),
+  }));
+  return selection;
+}
+
+// The tutor cleared the board, which takes the student's circles with it.
+export function clearBoardSelections(conversation_id: string) {
+  updateConversation(conversation_id, (item) => (item.board_selections?.length ? { ...item, board_selections: [] } : item));
+}
+
+// Some circles went with the file they were on. Their IDs aren't given out again.
+export function removeBoardSelections(conversation_id: string, ids: string[]) {
+  if (!ids.length) return;
+  updateConversation(conversation_id, (item) => ({
+    ...item,
+    board_selections: (item.board_selections ?? []).filter((selection) => !ids.includes(selection.id)),
+  }));
 }

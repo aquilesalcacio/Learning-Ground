@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { applyLgAction, askLgQuestion, type LgAction } from "@/lib/lg-actions";
 import { parseNumber, parseNumberLineMarks, SHAPE_KINDS, type ShapeKind } from "@/lib/lg-ink";
 import { runStudentProgress } from "@/lib/lg-progress-run";
-import { getActiveDocument, getBoardQuestions, useLgState } from "@/lib/lg-store";
+import { getActiveDocument, getBoardQuestions, getBoardSelections, useLgState } from "@/lib/lg-store";
 
 // Asks a question on the board, as the tutor's ask_question tool does, beside a region or on a
 // free spot. Works with no homework open, which is how the tutor teaches on a blank board.
@@ -189,7 +189,12 @@ export function TutorActions() {
     region_id: question.id,
     label: `Question ${question.id.slice(1)}`,
   }));
-  const regions = [...homework, ...questions];
+  // So do spots the student circled with Show the tutor, aimed at by their s IDs.
+  const selections = getBoardSelections(state).map((selection) => ({
+    region_id: selection.id,
+    label: `Circled spot ${selection.id.slice(1)}`,
+  }));
+  const regions = [...homework, ...questions, ...selections];
   const [chosenId, setRegionId] = useState("");
   const [hint, setHint] = useState("");
   const [latex, setLatex] = useState("");
@@ -231,7 +236,8 @@ export function TutorActions() {
       {!region ? (
         <div className="grid gap-3 pt-1">
           <p className="text-xs text-muted-foreground">
-            Upload homework, or ask a question on the board, to test the tutor&apos;s marks.
+            Upload homework, ask a question on the board, or circle something with Show the tutor, to test the
+            tutor&apos;s marks.
           </p>
           <AskForm regionId="" regionLabel="" />
           <ProgressButton />

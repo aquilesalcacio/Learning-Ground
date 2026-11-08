@@ -49,14 +49,20 @@ Never commit these files. A tutor session starts from a one-time credential the 
 
 3. **Keep `applyLgAction(action)` in `web/lib/lg-actions.ts`.** Voice tools call it. Keep the action names and parameters, because they match `api/voice/tools.json` and the live ElevenLabs agent. See "The tutor's pen" below for how marks are drawn.
 4. **Tag tutor shapes with `meta.author = "tutor"`.** `clear` and Check my work rely on this to tell them apart from the student's work.
-5. **Tag fixed board shapes with `meta.kind`,** such as `"page"` or `"region"`. Region shapes also need `meta.region_id`. Check my work uses these to find the student's marks and the page under them. Page images are locked image shapes with `meta.kind = "page"` and `meta.page`, created with `history: "ignore"` so undo can't remove them, and kept below everything else.
-6. **Keep the five `lg-board-link.ts` lines in `lg-actions.ts`.** They're the only back-end code in that file. If you rewrite it, add them back:
+5. **Tag fixed board shapes with `meta.kind`,** such as `"page"`, `"region"` or `"selection"` (a spot the student circled, below). Region shapes also need `meta.region_id`. Check my work uses these to find the student's marks and the page under them. Page images are locked image shapes with `meta.kind = "page"` and `meta.page`, created with `history: "ignore"` so undo can't remove them, and kept below everything else.
+6. **Keep the `lg-board-link.ts` lines in `lg-actions.ts`.** They're the only back-end code in that file. If you rewrite it, add them back:
 
    ```ts
-   import { linkLgBoard, noteLgActionTarget } from "./lg-board-link";
+   import { lgSelectionBounds, linkLgBoard, noteLgActionTarget } from "./lg-board-link";
 
    // In applyLgAction, once the editor exists:
    noteLgActionTarget(action as { region_id?: string; near_region_id?: string });
+
+   // In selectionTarget, which resolves a circled spot's ID (s1) for resolveTarget:
+   const bounds = selection && lgSelectionBounds(id);
+
+   // In recordLgSelection, once the circled spot is saved:
+   noteLgActionTarget({ region_id: added.id });
 
    // In bindLearningGrounds, once the board is ready:
    const unlink = linkLgBoard(editor);
@@ -90,10 +96,10 @@ The tutor never drops a finished shape on the board. `applyLgAction` turns each 
 | `number_line` | `near_region_id`, `min`, `max`, `marks?` | The axis and ticks drawn left to right, then the numbers, then a dot for each mark |
 | `plot_graph` | `near_region_id?`, `functions`, `x_min`, `x_max`, `y_min?`, `y_max?`, `points?` | The x axis (520 ms) and y axis (440 ms) with their ticks, the numbers (90 ms each), each curve left to right in its own colour (about 900 ms a curve), then a dot and a label for each point |
 | `draw_shape` | `near_region_id?`, `shape`, `labels?`, `parts?`, `shaded?` | The outline by hand (500 to 1100 ms), then a fraction's dividers (140 ms each) and shaded parts (220 ms each), the right-angle marker, radius or dashed height, then the labels, letter by letter |
-| `clear` | none | The tutor's marks and questions fade out. The student's work stays |
+| `clear` | none | The tutor's marks and questions, and the spots the student circled, fade out. The student's work stays |
 | `get_student_progress` | none | The pen thinks in the middle of the view while the tutor looks up the student's Canvas LMS info. It returns a report to the tutor and leaves no mark |
 
-Every ID above can also be the ID of a question the tutor wrote (below).
+Every ID above can also be the ID of a question the tutor wrote (`q1`) or of a spot the student circled (`s1`), both below.
 
 ### Graphs and shapes
 
@@ -124,6 +130,16 @@ Each Check my work result is saved with the problem's text (`topic`, up to 120 c
 - `captureLgRegion("q1")` captures the question's note and what the student wrote in or near its answer box.
 - When the student writes in an answer box and stops for 4 seconds, `onLgAnswerWritten` fires. `chat-dock.tsx` then sends `[Answer written] ... q1` during a live session, and the tutor checks the answer without being asked.
 
+### Show the tutor (student circles)
+
+The pencil menu's **Show the tutor** tool (`LgPointTool`, id `lg-point`, in `web/lib/lg-point-tool.ts`, registered with `tools={[LgPointTool]}` on `<Tldraw>`) lets the student point at anything on the board: a tap leaves a small ring, and a drag a loop that closes itself. The geometry (closing the loop, its bounds, the minimum size of a tap, and what the spot is on) is in `web/lib/lg-selection.ts`, which `node --test` runs.
+
+- **The mark** is a tldraw `draw` shape in a light blue dashed style, created outside the undo history, with `meta.kind = "selection"` and `meta.selection_id`. Because it has a `meta.kind`, it never counts as the student's work, and it doesn't start a chat or move the focus region by itself, so `recordLgSelection` in `lg-actions.ts` does both.
+- **Saved with the chat** as `board_selections`: `{ id, bounds, region_id?, question_id?, created_at }`, with IDs `s1`, `s2` and so on, never reused within a chat (`board_selection_count`), and the last 20 kept. A spot on a question the tutor wrote belongs to the question, otherwise to the region there (`regionAt` in `lg-regions.ts`, which matches the printed problem, then its working area, never the margin). When a board opens, loops the chat no longer lists are removed.
+- **Tutor tools** take `s1` like any ID. Its bounds come from the loop on the board, which moves with its file, or from the saved bounds when the loop is gone. Notes about it go in the margin of its region or question, with that problem's other notes. `read_student_work("s1")` checks just what's inside the loop, labelled "the part the student circled on Problem 3", and `captureLgRegion("s1")` crops to the loop, with the page and the student's marks there but not the loop or the tutor's marks. `clear` removes the loops too.
+- **The tutor reacts by itself.** `onLgSelection` fires when a loop is finished. `chat-dock.tsx` sends `[Student circled] s1, on Problem 3 (p1.q3), around the student's own writing.` (or "on the printed problem, with none of the student's writing") as a contextual update at once, so a question the student then asks is about that spot. After 2 seconds, if no student line arrived, the chat draft is empty and the microphone stayed quiet, it sends the same words as a message, which starts a text chat when no session is live. That costs agent credits.
+- **Each session's prompt** lists the spots on the board in a `<selections>` block.
+
 ### Changing the tools
 
 `api/voice/tools.json`, `clientTools` in `lg-voice.tsx` and the `LgAction` union must name the same tools with the same parameters. Tools that return a result to the tutor (`ask_question`, `read_student_work` and `get_student_progress`) aren't board actions, so they're in `tools.json` and `clientTools` only. After changing them, run `uv run scripts/elevenlabs_setup.py agent` from `api/` to update the live agent. Ship the web change and the agent change together, because a web build that doesn't know a tool fails when the tutor calls it.
@@ -139,7 +155,7 @@ A chat's homework can hold several files. Uploading again adds the new file besi
 Students can move and remove files on the board:
 
 - **Moving** goes through `startLgFileMove`, `moveLgFileBy` and `endLgFileMove`. A file's pages move together, with their region outlines and every mark on them or in their margins, and the new positions are saved in the document. The page images stay locked, so tldraw's own tools still can't move them.
-- **Removing** goes through `removeLgFile`. It deletes the file's pages, outlines and the tutor's marks on it. The student's own marks stay. Removing the last file removes the homework, as `removeLgDocument` does.
+- **Removing** goes through `removeLgFile`. It deletes the file's pages, outlines and the tutor's marks on it, and the spots circled on it with their `s` IDs. The student's own marks stay. Removing the last file removes the homework, as `removeLgDocument` does.
 - **Where files are on screen** comes from `getLgFiles` and `subscribeLgFiles`. `components/board-files.tsx` uses it for the move handles and the selected file's toolbar.
 - **Saved positions:** when a board opens, the document and the board are reconciled. The board saves a moment after the chat, so after a quick reload the page positions on the board win, and pages the document no longer lists are removed.
 
@@ -173,10 +189,12 @@ The image endpoints take multipart form data. All answer errors as `{ "detail": 
 
 ## Changing the board
 
-`web/lib/lg-board-link.ts` is the only back-end file that uses tldraw. If you replace tldraw, keep these two functions and rewrite what's inside them:
+`web/lib/lg-board-link.ts` is the only back-end file that uses tldraw. If you replace tldraw, keep these four functions and rewrite what's inside them:
 
 - `linkLgBoard(editor)` connects the back end when a board opens, and returns a function that disconnects it.
-- `captureLgRegion(region_id)` returns a PNG of the student's work on that region, without the tutor's marks. It includes the homework page under it, cropped to the region's working area: the problem and the space below it, down to just above the next problem or the page bottom. It returns `"no_work"` when the student hasn't written anything there. With no homework open, it captures all of the student's marks on the board.
+- `captureLgRegion(region_id)` returns a PNG of the student's work on that region, without the tutor's marks. It includes the homework page under it, cropped to the region's working area: the problem and the space below it, down to just above the next problem or the page bottom. For a spot the student circled (`s1`), it's cropped to the loop instead. It returns `"no_work"` when the student hasn't written anything there. With no homework open, it captures all of the student's marks on the board.
+- `lgSelectionBounds(selection_id)` returns where a circled spot is now: its loop's bounds, which move with its file, or the saved bounds when the loop is gone, and null for an ID the chat doesn't list.
+- `lgSelectionHasWork(selection_id)` says whether the student's own marks are inside the loop, so the tutor hears whether they circled their work or the printed problem.
 
 ## Optional
 
