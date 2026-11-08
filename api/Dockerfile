@@ -1,4 +1,4 @@
-# The API for Easypanel (or any Docker host): FastAPI on port 8000.
+# The API on our VPS (deploy/compose.yaml), or any Docker host: FastAPI on port 8000.
 # Keys come from the service's environment, never from a baked-in .env.
 # Mount a volume at /app/data: Canvas LMS connections are kept there in SQLite.
 
@@ -11,5 +11,5 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY . .
 RUN mkdir -p /app/data
 EXPOSE 8000
-# Behind Easypanel's proxy, which ends HTTPS and forwards the real scheme and client address.
+# Behind nginx, which ends HTTPS and forwards the real scheme and client address.
 CMD ["uv", "run", "--no-sync", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]

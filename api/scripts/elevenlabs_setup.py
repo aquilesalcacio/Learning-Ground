@@ -253,8 +253,7 @@ def cmd_agent(args: argparse.Namespace) -> None:
         else:
             agent_id = checked(http.post("/v1/convai/agents/create", json=body))["agent_id"]
             print(f"Created agent {agent_id}")
-    print(f"\nAdd to api/.env:          ELEVENLABS_AGENT_ID={agent_id}")
-    print(f"Add to web/.env.local:    NEXT_PUBLIC_ELEVENLABS_AGENT_ID={agent_id}   (G1 test only)")
+    print(f"\nAdd to api/.env:  ELEVENLABS_AGENT_ID={agent_id}")
 
 
 def main() -> None:

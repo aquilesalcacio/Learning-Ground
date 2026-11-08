@@ -18,7 +18,7 @@ uv run uvicorn main:app --reload --port 8000
 | `api/.env` | `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, `GEMINI_API_KEY`, and the Auth0 and Canvas LMS settings in `api/.env.example` | Ask Lorenzo, or use your own Gemini key |
 | `web/.env.local` | `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`, `AUTH0_SECRET`, `AUTH0_AUDIENCE`, `APP_BASE_URL`, and optionally `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`) and `NEXT_PUBLIC_TLDRAW_LICENSE_KEY` | Ask Lorenzo |
 
-Never commit these files. A tutor session starts from a one-time credential the API gets from ElevenLabs (`POST /voice/session`), so the API must be running to talk to the tutor. The web app no longer reads `NEXT_PUBLIC_ELEVENLABS_AGENT_ID`. Deploying is in [DEPLOY.md](DEPLOY.md).
+Never commit these files. A tutor session starts from a one-time credential the API gets from ElevenLabs (`POST /voice/session`), so the API must be running to talk to the tutor. Deploying is in [DEPLOY.md](DEPLOY.md).
 
 ## What the UI must keep
 

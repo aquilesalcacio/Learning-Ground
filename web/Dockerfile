@@ -1,4 +1,4 @@
-# The web app for Easypanel (or any Docker host): Next's standalone server on port 3000.
+# The web app on our VPS (deploy/compose.yaml), or any Docker host: Next's standalone server on port 3000.
 # NEXT_PUBLIC_ values are baked into the browser code at build time, so they're build arguments.
 # Everything else (AUTH0_*, APP_BASE_URL) is read when the server runs.
 
