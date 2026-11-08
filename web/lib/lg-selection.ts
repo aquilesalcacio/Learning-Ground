@@ -119,6 +119,36 @@ export function selectionOwner(
   return region_id ? { region_id } : {};
 }
 
+// Strokes this close to one already taken belong to the same drawing: about a letter's gap in
+// handwriting, or between a graph's axis, curve and labels.
+const CLUSTER_GAP = 64;
+// Nothing past this far from the area is taken, so a long chain of strokes can't sweep in the board.
+const CLUSTER_REACH = 900;
+
+function near(a: LgBounds, b: LgBounds, gap: number) {
+  return a.x - gap <= b.x + b.w && a.x + a.w + gap >= b.x && a.y - gap <= b.y + b.h && a.y + a.h + gap >= b.y;
+}
+
+// Each pen stroke is its own shape, so a drawing is many of them. Starting from the strokes that
+// touch an area, such as an answer box, this takes in every stroke close to one already taken, so a
+// graph drawn beside the box comes whole, not just the stroke that crossed it. Returns their indexes.
+export function growCluster(area: LgBounds, boxes: LgBounds[], gap = CLUSTER_GAP, reach = CLUSTER_REACH): number[] {
+  const taken = new Set<number>();
+  boxes.forEach((item, index) => {
+    if (near(item, area, 0)) taken.add(index);
+  });
+  const queue = [...taken];
+  while (queue.length) {
+    const from = boxes[queue.pop()!];
+    boxes.forEach((item, index) => {
+      if (taken.has(index) || !near(item, area, reach) || !near(item, from, gap)) return;
+      taken.add(index);
+      queue.push(index);
+    });
+  }
+  return [...taken];
+}
+
 // How Check my work names a circled part, such as "the part the student circled on Problem 3".
 export function selectionLabel(on: string): string {
   const label = `the part the student circled on ${on.replace(/\s+/g, " ").trim() || "the board"}`;

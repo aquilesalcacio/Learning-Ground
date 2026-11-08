@@ -418,7 +418,7 @@
     "tool_config": {
       "type": "client",
       "name": "read_student_work",
-      "description": "Look at what the student has written on a problem, in the answer box of one of your questions, or inside a spot they circled, and get a report on whether it's right. Use it when the student asks you to check their work, or when a message says they wrote an answer or circled their work. It takes a few seconds, so say you're taking a look first.",
+      "description": "Look at what the student has written on a problem, in or beside the answer box of one of your questions, inside a spot they circled, or anywhere on their screen, and get a report on whether it's right. Use it when the student asks you to check their work or whether you can see what they drew, or when a message says they wrote an answer or circled their work. It takes a few seconds, so say you're taking a look first.",
       "expects_response": true,
       "response_timeout_secs": 35,
       "parameters": {
@@ -426,7 +426,7 @@
         "properties": {
           "region_id": {
             "type": "string",
-            "description": "ID of a homework region exactly as listed, such as p1.q3, of a question you wrote, such as q1, or of a spot the student circled, such as s1."
+            "description": "ID of a homework region exactly as listed, such as p1.q3, of a question you wrote, such as q1, or of a spot the student circled, such as s1. Use \"board\" for anything else the student drew on their screen."
           }
         },
         "required": [

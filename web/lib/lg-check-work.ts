@@ -1,7 +1,7 @@
 "use client";
 
 import { LgApiAuthError, lgApiFetch } from "./lg-api";
-import { captureLgRegion } from "./lg-board-link";
+import { captureLgRegion, LG_BOARD_ID } from "./lg-board-link";
 import { apiErrorMessage } from "./lg-document";
 import { markVerdictFor } from "./lg-ink";
 import { findRegion } from "./lg-regions";
@@ -40,10 +40,12 @@ export async function checkStudentWork(region_id: string): Promise<WorkCheckOutc
   // A circled spot is named after the problem or question it's on, which is also its topic.
   const question = findBoardQuestion(state, selection ? (selection.question_id ?? "") : region_id);
   const region = findRegion(document, selection ? (selection.region_id ?? "") : region_id);
-  if (document && !region && !question && !selection) return { ok: false, message: `There's no region called ${region_id}.` };
+  // "board" is whatever the student drew on their screen. It has no ID of its own to mark.
+  const whole = region_id === LG_BOARD_ID;
+  if (document && !whole && !region && !question && !selection) return { ok: false, message: `There's no region called ${region_id}.` };
   const owner = question ? questionLabel(question.id, question.text) : region?.label;
-  const label = selection ? selectionLabel(owner ?? "") : (owner ?? "the board");
-  const checked_id = selection?.id ?? question?.id ?? region?.region_id ?? "";
+  const label = whole ? "what the student drew on the board" : selection ? selectionLabel(owner ?? "") : (owner ?? "the board");
+  const checked_id = whole ? "" : (selection?.id ?? question?.id ?? region?.region_id ?? "");
 
   const capture = await captureLgRegion(region_id);
   if (capture === "no_board") return { ok: false, message: "No board is open, so there's no work to check." };
@@ -56,6 +58,7 @@ export async function checkStudentWork(region_id: string): Promise<WorkCheckOutc
         : "";
     return { ok: false, message: `The student hasn't written anything in ${label}.${printed}` };
   }
+  if (capture === "no_work" && whole) return { ok: false, message: "The student hasn't drawn or written anything on the board yet." };
   if (capture === "no_work") return { ok: false, message: `Nothing is written on ${label} yet.` };
 
   const form = new FormData();

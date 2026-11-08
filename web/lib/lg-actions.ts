@@ -97,6 +97,7 @@ import {
   getActiveDocument,
   getActiveTutor,
   getBoardQuestions,
+  getBoardSelections,
   getConversationDocument,
   readLgState,
   removeBoardSelections,
@@ -106,7 +107,7 @@ import {
   subscribeLgState,
   updateBoardQuestion,
 } from "./lg-store";
-import { resolveLanguage } from "./lg-tutor-prompt";
+import { droppedMarksUpdate, resolveLanguage } from "./lg-tutor-prompt";
 import {
   type LgBackground,
   type LgDocument,
@@ -904,6 +905,12 @@ function boardConversation(): string {
 // Every tutor mark fades out together, then goes, with the tutor's written questions and the
 // spots the student circled. The student's work stays, including what they wrote in an answer box.
 function clearSteps(editor: Editor): PenStep[] {
+  // What's on the board now. The tutor often calls clear and ask_question together: the new question
+  // is saved at once, before this fade-out ends, and must not be cleared with the old ones.
+  const state = readLgState();
+  const conversation_id = state.active_conversation_id;
+  const questionIds = getBoardQuestions(state).map((question) => question.id);
+  const selectionIds = getBoardSelections(state).map((selection) => selection.id);
   let marks: TLShape[] = [];
   return [
     {
@@ -912,7 +919,11 @@ function clearSteps(editor: Editor): PenStep[] {
       begin: () => {
         marks = editor
           .getCurrentPageShapes()
-          .filter((shape) => shape.meta.author === "tutor" || shape.meta.kind === "selection");
+          .filter(
+            (shape) =>
+              shape.meta.author === "tutor" ||
+              (shape.meta.kind === "selection" && selectionIds.includes(String(shape.meta.selection_id))),
+          );
       },
       frame: (t) => {
         editor.updateShapes(
@@ -923,10 +934,9 @@ function clearSteps(editor: Editor): PenStep[] {
       },
       end: () => {
         editor.deleteShapes(marks.map((shape) => shape.id).filter((id) => exists(editor, id)));
-        const conversation_id = readLgState().active_conversation_id;
         if (conversation_id) {
-          clearBoardQuestions(conversation_id);
-          clearBoardSelections(conversation_id);
+          clearBoardQuestions(conversation_id, questionIds);
+          clearBoardSelections(conversation_id, selectionIds);
         }
       },
     },
@@ -1015,11 +1025,52 @@ export function applyLgAction(action: LgAction) {
   if (!steps) {
     // Without homework or a written question there's nothing to aim at: the tutor would mark empty space.
     console.warn("[lg] This action names no region or written question on the board, or can't be drawn:", action);
+    noteDroppedMark(action);
     return;
   }
   // A figure that can't be drawn has already said why.
   if (!steps.length) return;
   enqueuePen(steps);
+}
+
+// Marks the tutor aimed at IDs that aren't on the board. Its drawing tools don't wait for an answer,
+// so it would believe it drew them: chat-dock.tsx tells it otherwise, as a contextual update. A
+// burst of them (several tools in one reply) is gathered into one update.
+const DROPPED_BATCH_MS = 300;
+const droppedListeners = new Set<(message: string) => void>();
+let droppedMarks: { tool: string; ids: string[] }[] = [];
+let droppedTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Told, with the update's text, when the tutor's marks named IDs that aren't on the board.
+export function onLgMarksDropped(listener: (message: string) => void) {
+  droppedListeners.add(listener);
+  return () => {
+    droppedListeners.delete(listener);
+  };
+}
+
+// Every ID the tutor can aim at now: the homework's regions, its questions and the student's circles.
+function boardIds(): string[] {
+  const state = readLgState();
+  return [
+    ...(getActiveDocument(state)?.regions.map((region) => region.region_id) ?? []),
+    ...getBoardQuestions(state).map((question) => question.id),
+    ...getBoardSelections(state).map((selection) => selection.id),
+  ];
+}
+
+function noteDroppedMark(action: LgAction) {
+  const named = action as { region_id?: string; near_region_id?: string; from_region_id?: string; to_region_id?: string };
+  const ids = [named.region_id, named.near_region_id, named.from_region_id, named.to_region_id].filter(
+    (id): id is string => !!id && !boardIds().includes(id),
+  );
+  droppedMarks.push({ tool: action.type, ids });
+  droppedTimer ??= setTimeout(() => {
+    const message = droppedMarksUpdate(droppedMarks, boardIds());
+    droppedMarks = [];
+    droppedTimer = null;
+    droppedListeners.forEach((listener) => listener(message));
+  }, DROPPED_BATCH_MS);
 }
 
 // A free spot on screen for a question written on a blank board: centred near the top of the
@@ -1170,7 +1221,9 @@ function questionSteps(editor: Editor, conversation_id: string, id: string, text
 export function lookAtLgWork(region_id: string) {
   const target = lgEditor ? resolveTarget(getActiveDocument(readLgState()), region_id) : null;
   const work = target?.work;
-  penLook(work ? { x: work.x + Math.min(work.w * 0.4, 160), y: work.y + Math.min(work.h * 0.5, 90) } : null);
+  // The whole board ("board") has no spot of its own, so the pen looks from the middle of the view.
+  if (!work) return lookAtLgBoard();
+  penLook({ x: work.x + Math.min(work.w * 0.4, 160), y: work.y + Math.min(work.h * 0.5, 90) });
 }
 
 // While the tutor looks something up that isn't on the board, such as the student's progress, its

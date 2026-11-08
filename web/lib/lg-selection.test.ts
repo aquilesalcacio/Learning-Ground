@@ -9,6 +9,7 @@ const selection = (await import(`./lg-selection${".ts"}`)) as typeof import("./l
 const {
   boundsOf,
   closeLoop,
+  growCluster,
   LOOP_POINTS_MAX,
   ringPoints,
   SELECTION_MIN,
@@ -128,4 +129,33 @@ test("the label for a circled part stays within the API's 80 characters", () => 
   const long = selectionLabel(`Question 1: ${"How many apples are left ".repeat(6)}`);
   assert.ok(long.length <= 80, `${long.length} characters`);
   assert.ok(long.endsWith("…"));
+});
+
+// Strokes as their board bounds. Each pen stroke is its own shape, so a drawing is many of these.
+const box = (x: number, y: number, w = 20, h = 20) => ({ x, y, w, h });
+
+test("a drawing beside the answer box comes whole, not just the stroke that crosses it", () => {
+  const answer = box(0, 0, 300, 150);
+  // A graph to the right: its axis crosses the box, its curve and labels are 30-50 units apart.
+  const strokes = [box(280, 60, 200, 4), box(300, 20, 4, 120), box(330, 30, 120, 80), box(470, 0, 30, 20), box(470, 120, 30, 20)];
+  assert.deepEqual(growCluster(answer, strokes).sort(), [0, 1, 2, 3, 4]);
+});
+
+test("strokes that don't touch the drawing stay out", () => {
+  const answer = box(0, 0, 300, 150);
+  const strokes = [box(100, 50), box(1200, 50), box(100, 900)];
+  assert.deepEqual(growCluster(answer, strokes), [0]);
+});
+
+test("nothing touching the area means nothing is taken", () => {
+  assert.deepEqual(growCluster(box(0, 0, 300, 150), [box(600, 0), box(630, 0)]), []);
+});
+
+test("a long chain of strokes can't sweep in the whole board", () => {
+  const answer = box(0, 0, 300, 150);
+  // Strokes every 50 units, running far off to the right.
+  const strokes = Array.from({ length: 60 }, (_, index) => box(290 + index * 50, 60));
+  const taken = growCluster(answer, strokes);
+  assert.ok(taken.length > 3 && taken.length < 60, `${taken.length} strokes taken`);
+  for (const index of taken) assert.ok(strokes[index].x <= 300 + 900, `stroke at x ${strokes[index].x}`);
 });

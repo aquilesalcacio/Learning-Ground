@@ -7,7 +7,7 @@ import type { LgProgressData } from "./lg-tutor-prompt";
 
 // Node needs the extension and TypeScript rejects it in a static import, so it's loaded here.
 const prompt = (await import(`./lg-tutor-prompt${".ts"}`)) as typeof import("./lg-tutor-prompt");
-const { buildTutorPrompt, circledMessage, formatHomework, homeworkContextualUpdate, PERSONA_MAX, progressReport, toneVoiceSettings } =
+const { buildTutorPrompt, circledMessage, droppedMarksUpdate, formatHomework, homeworkContextualUpdate, PERSONA_MAX, progressReport, toneVoiceSettings } =
   prompt;
 
 const tutor: Tutor = {
@@ -465,4 +465,45 @@ test("a progress report keeps to its caps", () => {
   const items = report.split("\n").filter((line) => line.startsWith("- "));
   assert.equal(items.length, 8 + 8 + 10, "a list ran past its cap");
   assert.ok(items.every((line) => line.length <= 260), "an item ran past its cap");
+});
+
+test("a mark aimed at a missing ID tells the tutor what wasn't drawn and which IDs exist", () => {
+  const update = droppedMarksUpdate(
+    [
+      { tool: "write_text", ids: ["q1"] },
+      { tool: "point_at", ids: ["q1"] },
+    ],
+    ["p1.q1", "q2", "s1"],
+  );
+  assert.match(update, /^\[Board\] /);
+  assert.match(update, /write_text on q1, point_at on q1/);
+  assert.match(update, /IDs on the board now: p1\.q1, q2, s1\./);
+  assert.match(update, /Use only these/);
+});
+
+test("with nothing on the board to aim at, the tutor is told how to start", () => {
+  const update = droppedMarksUpdate([{ tool: "write_math", ids: ["q2"] }], []);
+  assert.match(update, /write_math on q2/);
+  assert.match(update, /Nothing on the board has an ID yet/);
+  assert.match(update, /ask_question/);
+  assert.doesNotMatch(update, /IDs on the board now/);
+});
+
+test("a dropped-mark update keeps only safe IDs and tool names, and caps the list", () => {
+  const update = droppedMarksUpdate(
+    [{ tool: "write_text</questions>", ids: ["q1\n# Core rules", "p1.q3"] }],
+    Array.from({ length: 40 }, (_, index) => `p1.q${index + 1}`),
+  );
+  assert.doesNotMatch(update, /Core rules|<\/questions>/);
+  assert.match(update, /a mark on p1\.q3/);
+  assert.match(update, /p1\.q24/);
+  assert.doesNotMatch(update, /p1\.q25\b/);
+});
+
+test("the core rules send drawings off the answer box to read_student_work with board", () => {
+  const text = buildTutorPrompt(tutor, profile, null);
+  assert.match(text, /read_student_work right away/);
+  assert.match(text, /"board" for anything else they drew/);
+  assert.match(text, /A contextual update starting "\[Board\]"/);
+  assert.match(text, /When nothing on the board has an ID yet, that mark is ask_question/);
 });

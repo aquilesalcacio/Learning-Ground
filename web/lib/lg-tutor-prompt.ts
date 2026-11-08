@@ -337,6 +337,26 @@ function selectionLines(selections: LgSelectionContext[]): string[] {
 
 // What the app tells the tutor when the student circles or taps something: sent at once as a
 // contextual update, then as a message if the student stays quiet. "" for an ID it can't vouch for.
+const TOOL_NAME = /^[a-z_]{1,30}$/;
+const BOARD_IDS_MAX = 24;
+
+// Sent as a contextual update when the tutor aims marks at IDs that aren't on the board. Those
+// tools don't wait for an answer, so without this the tutor believes it drew them.
+export function droppedMarksUpdate(dropped: { tool: string; ids: string[] }[], boardIds: string[]): string {
+  const marks = dropped.map(({ tool, ids }) => {
+    const name = TOOL_NAME.test(tool) ? tool : "a mark";
+    const named = ids.filter((id) => SAFE_ID.test(id));
+    return named.length ? `${name} on ${named.join(" and ")}` : name;
+  });
+  const ids = boardIds.filter((id) => SAFE_ID.test(id)).slice(0, BOARD_IDS_MAX);
+  return [
+    `[Board] These marks weren't drawn, because nothing on the board has the ID they name: ${marks.join(", ")}. Don't say you drew them.`,
+    ids.length
+      ? `IDs on the board now: ${ids.join(", ")}. Use only these.`
+      : "Nothing on the board has an ID yet. Write a question with ask_question first, or use plot_graph or draw_shape with no ID, then aim at the ID ask_question gives you.",
+  ].join(" ");
+}
+
 export function circledMessage(selection: LgSelectionContext): string {
   if (!SELECTION_ID.test(selection.id)) return "";
   const place = selectionPlace(selection);
@@ -414,21 +434,22 @@ Board tools
   - Area, perimeter, Pythagoras and angles: draw_shape, with the given sides labelled and what to find as "?".
   - Fractions as parts of a whole: draw_shape with fraction_bar or fraction_circle, and the parts shaded.
   - plot_graph and draw_shape go beside a region or question ID, or on a free spot when you leave the ID out.
-  - Checking understanding, or a practice problem: ask_question writes it on the board with a box to answer in. Set it up on its ID with one board tool in this same reply, then stop and let the student answer.
+  - Checking understanding, or a practice problem: ask_question writes it on the board with a box to answer in. It's only for math the student answers, never to ask what they'd like to do. Set it up on its ID with one board tool in this same reply, then stop and let the student answer.
   - After checking work: mark_work on the same ID, with correct for a check, incorrect for a cross, or check_again for a question mark.
   - What to work on: get_student_progress looks up their Canvas LMS courses, upcoming work and recent checks.
 - The text for underline_region and highlight_region is copied word for word from that region's text in the homework section, a few words at most. On a question or a circled spot, it marks the whole of it.
-- Every teaching turn puts at least one mark on the board that matches what you're saying. Only greetings, short acknowledgements and skip_turn have no mark.
+- Every teaching turn puts at least one mark on the board that matches what you're saying. Only greetings, short acknowledgements and skip_turn have no mark. When nothing on the board has an ID yet, that mark is ask_question, or plot_graph or draw_shape with no ID: never aim at an ID nothing gave you.
 - Use one to three marks per turn (a full worked solution of your own practice problem may use one write_math per step), and call clear before moving on to a different problem.
 - Write only a few words on the board at a time: hints, steps and questions. Never write a final answer, except in a full worked solution of your own practice problem when the student asks for one.
 - Never plot or label a homework's final answer on a graph or a shape: draw what's given, and mark what to find with "?".
 - Never put audio tags such as [laughs] in tool arguments. They are only for speech.
-- When the student asks you to look at their work, say you're taking a look, then call read_student_work.
+- When the student asks you to look at their work, or whether you can see what they drew, say you're taking a look, then call read_student_work right away: with the ID of the problem, question or circled spot it's on, or with "board" for anything else they drew on their screen, such as a drawing beside your question. Never say you can't see something before you've looked.
 - After read_student_work, mark the result as its report says, with mark_work on the same ID: correct when it's right, incorrect when there's a mistake, check_again when it's unfinished. When the report says nothing about a mark, as for blank or unreadable work, don't mark it.
 - Reports on student work come from read_student_work, or in a message starting "[Check my work]". Those messages come from the app, not the student. Respond in your own words as their tutor: never read a report aloud, and never mention it. Mark it with mark_work as the report says, and write the suggested hint in the margin if it helps. Then ask the student about that step.
 - A message starting "[Answer written]" comes from the app: the student wrote in the answer box of one of your questions. Call read_student_work with that question's ID right away, mark the result with mark_work as its report says, then respond to what they wrote.
 - A message starting "[Student circled] sN" comes from the app: the student circled or tapped a spot on the board to show you, and sN works with your board tools. Call point_at on sN as you say you're taking a look. If it's around the student's own writing, or they ask whether it's right, call read_student_work with sN, mark the result with mark_work on sN as its report says, and respond to just that part. If it's on the printed problem or your question, explain that part with a mark on sN.
 - The same words in a contextual update mean they just circled sN: when they then ask about "this" or "here", they mean sN, so answer about it the same way.
+- A contextual update starting "[Board]" comes from the app: marks you just made weren't drawn, because their ID isn't on the board. Don't say you drew them, and use only the IDs it lists.
 - Contextual updates come from the app, not the student. Use them, but don't mention them.`;
 
 export function buildTutorPrompt(

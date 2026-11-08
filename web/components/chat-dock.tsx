@@ -8,7 +8,7 @@ import { pulseTutorOrb } from "@/components/tutor-orb";
 import { TutorStage } from "@/components/tutor-stage";
 import { UploadDialog } from "@/components/upload-dialog";
 import { Button } from "@/components/ui/button";
-import { onLgAnswerWritten, onLgHomeworkRead, onLgSelection } from "@/lib/lg-actions";
+import { onLgAnswerWritten, onLgHomeworkRead, onLgMarksDropped, onLgSelection } from "@/lib/lg-actions";
 import { lgSelectionHasWork } from "@/lib/lg-board-link";
 import {
   appendMessage,
@@ -77,6 +77,13 @@ function Dock({ state, boardId }: { state: LgState; boardId: string }) {
     voice.sendWhenReady(`[Answer written] The student wrote an answer in the box for ${question_id}.`);
   });
   useEffect(() => onLgAnswerWritten((question_id) => tellTutorAboutAnswer(question_id)), []);
+
+  // The tutor aimed marks at IDs that aren't on the board, so nothing was drawn. It hears so in the
+  // background, with the IDs it can use, instead of believing it drew them.
+  const tellTutorAboutDroppedMarks = useEffectEvent((message: string) => {
+    voice.sendContextualUpdate(message);
+  });
+  useEffect(() => onLgMarksDropped((message) => tellTutorAboutDroppedMarks(message)), []);
 
   // The student circled or tapped something on the board. A live session hears about it at once,
   // as background, so whatever they say next is about it. If they then stay quiet, haven't typed

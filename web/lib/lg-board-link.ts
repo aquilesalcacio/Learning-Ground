@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from "react";
 import { Box, type Editor, type TLShape } from "tldraw";
 import { findRegion, regionAt, regionWorkBounds, type LgBounds } from "./lg-regions";
-import { selectionArea } from "./lg-selection";
+import { growCluster, selectionArea } from "./lg-selection";
 import { findBoardQuestion, findBoardSelection, getActiveDocument, readLgState, subscribeLgState } from "./lg-store";
 
 // What the back end needs from the board, kept apart from lg-actions.ts so UI work there stays simple.
@@ -69,6 +69,10 @@ export function linkLgBoard(editor: Editor) {
 
 export type LgRegionCapture = Blob | "no_board" | "unknown_region" | "no_work";
 
+// What the tutor passes to read_student_work for whatever the student drew on their screen, when it
+// isn't in an answer box, a circled spot or a homework problem: "can you see my drawing?"
+export const LG_BOARD_ID = "board";
+
 // The API refuses snapshots over 5 MB. A photographed page can pass that at 2x, so it steps down.
 const MAX_CAPTURE_BYTES = 4.5 * 1024 * 1024;
 const PIXEL_RATIOS = [2, 1.5, 1];
@@ -98,6 +102,14 @@ function reaches(editor: Editor, shape: TLShape, area: Box) {
 
 const marksIn = (editor: Editor, shapes: TLShape[], area: Box) =>
   shapes.filter((shape) => isStudentMark(shape) && reaches(editor, shape, area));
+// The student's strokes that reach an area, and every stroke of the same drawing (lg-selection.ts).
+function drawingAt(editor: Editor, marks: TLShape[], area: Box): TLShape[] {
+  const boxes = marks.map((shape) => editor.getShapePageBounds(shape));
+  const known = marks.filter((_, index) => boxes[index]);
+  const found = growCluster(area, boxes.filter((item): item is Box => !!item));
+  return found.map((index) => known[index]);
+}
+
 const pagesIn = (editor: Editor, shapes: TLShape[], area: Box) =>
   shapes.filter((shape) => shape.meta.kind === "page" && reaches(editor, shape, area));
 
@@ -129,7 +141,17 @@ export async function captureLgRegion(region_id: string): Promise<LgRegionCaptur
   let bounds: Box;
   // The working area already frames the problem, and wider padding would show the next one.
   let padding = document ? 8 : 16;
-  if (selected) {
+  if (region_id === LG_BOARD_ID) {
+    // What the student sees: their marks on screen, with the homework page under them. With none on
+    // screen, all of them, since the student may have scrolled away from what they mean.
+    const marks = shapes.filter(isStudentMark);
+    const view = editor.getViewportPageBounds();
+    const inView = marks.filter((shape) => reaches(editor, shape, view));
+    const work = inView.length ? inView : marks;
+    if (!work.some((shape) => shape.type !== "image")) return "no_work";
+    bounds = Box.Common(work.flatMap((shape) => editor.getShapePageBounds(shape) ?? []));
+    include = [...pagesIn(editor, shapes, bounds), ...work];
+  } else if (selected) {
     // Cropped to the loop, so the verdict is on just that part. The page is cropped by the bounds.
     const area = Box.From(selected);
     const work = marksIn(editor, shapes, area);
@@ -138,10 +160,10 @@ export async function captureLgRegion(region_id: string): Promise<LgRegionCaptur
     bounds = area;
     padding = 8;
   } else if (question) {
-    // The note shows the question being answered. The student may write a little outside the box.
+    // The note shows the question being answered. The student may write a little outside the box,
+    // or draw beside it (a graph, a sketch): every stroke of a drawing that reaches the box comes along.
     const area = Box.From(question.answer).expandBy(24);
-    const overlapsArea = (shape: TLShape) => !!editor.getShapePageBounds(shape)?.collides(area);
-    const work = shapes.filter((shape) => isStudentMark(shape) && overlapsArea(shape));
+    const work = drawingAt(editor, shapes.filter(isStudentMark), area);
     if (!work.some((shape) => shape.type !== "image")) return "no_work";
     const note = shapes.filter((shape) => shape.meta.question === question.id && shape.type === "note");
     include = [...note, ...work];

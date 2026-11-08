@@ -357,9 +357,15 @@ export function updateBoardQuestion(conversation_id: string, id: string, patch: 
   }));
 }
 
-// The tutor cleared its marks, so its questions are gone from the board too.
-export function clearBoardQuestions(conversation_id: string) {
-  updateConversation(conversation_id, (item) => (item.board_questions?.length ? { ...item, board_questions: [] } : item));
+// The tutor cleared its marks, so these questions are gone from the board too. Only the ones that
+// were there when it asked: a question it writes straight after clear must survive the fade-out.
+export function clearBoardQuestions(conversation_id: string, ids: readonly string[]) {
+  if (!ids.length) return;
+  updateConversation(conversation_id, (item) =>
+    item.board_questions?.some((question) => ids.includes(question.id))
+      ? { ...item, board_questions: item.board_questions.filter((question) => !ids.includes(question.id)) }
+      : item,
+  );
 }
 
 // Spots the student circled on the open chat's board (lg-actions.ts saves them).
@@ -386,8 +392,13 @@ export function addBoardSelection(conversation_id: string, make: (id: string) =>
 }
 
 // The tutor cleared the board, which takes the student's circles with it.
-export function clearBoardSelections(conversation_id: string) {
-  updateConversation(conversation_id, (item) => (item.board_selections?.length ? { ...item, board_selections: [] } : item));
+export function clearBoardSelections(conversation_id: string, ids: readonly string[]) {
+  if (!ids.length) return;
+  updateConversation(conversation_id, (item) =>
+    item.board_selections?.some((selection) => ids.includes(selection.id))
+      ? { ...item, board_selections: item.board_selections.filter((selection) => !ids.includes(selection.id)) }
+      : item,
+  );
 }
 
 // Some circles went with the file they were on. Their IDs aren't given out again.

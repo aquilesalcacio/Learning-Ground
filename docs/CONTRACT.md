@@ -132,8 +132,10 @@ Each Check my work result is saved with the problem's text (`topic`, up to 120 c
 `askLgQuestion(question, near_region_id?)` in `lg-actions.ts` writes a question for the student: a note in the tutor's colour, then "Your answer" in the session's language and a dashed box to answer in. With `near_region_id`, it goes in that region's margin. Without one, or with no homework open, it goes on a free spot of the board. That's how the tutor teaches on a blank board.
 
 - It returns the question's ID at once (`q1`, `q2` and so on, never reused within a chat). The voice tool `ask_question` hands the ID to the tutor.
-- Questions are saved with the chat as `board_questions`, so `read_student_work("q1")` and the other tools still find them after a reload. `clear` removes them.
-- `captureLgRegion("q1")` captures the question's note and what the student wrote in or near its answer box.
+- Questions are saved with the chat as `board_questions`, so `read_student_work("q1")` and the other tools still find them after a reload. `clear` removes the questions and circles that were on the board when it was called. One the tutor writes in the same reply, such as `clear` then `ask_question`, survives the fade-out.
+- `captureLgRegion("q1")` captures the question's note and what the student wrote in or near its answer box, with every stroke of a drawing that reaches the box (`growCluster` in `lg-selection.ts`): each pen stroke is its own shape, so a graph drawn beside the box comes whole, not just the stroke that crossed it.
+- `read_student_work("board")` (`LG_BOARD_ID` in `lg-board-link.ts`) checks whatever the student drew on their screen, with the homework page under it, or all their marks when none are on screen. It's for "can you see my drawing?" when the drawing isn't a problem, an answer box or a circle. Its report has no mark line, since there's no one spot to mark.
+- **Marks aimed at a missing ID:** drawing tools don't wait for an answer, so a mark whose ID isn't on the board used to fail silently while the tutor thought it drew. `applyLgAction` now gathers such marks for 300 ms and `onLgMarksDropped` fires; `chat-dock.tsx` sends the tutor a `[Board]` contextual update naming them and listing the IDs on the board (`droppedMarksUpdate` in `lg-tutor-prompt.ts`).
 - When the student writes in an answer box and stops for 4 seconds, `onLgAnswerWritten` fires. `chat-dock.tsx` then sends `[Answer written] ... q1` during a live session, and the tutor checks the answer without being asked.
 
 ### Show the tutor (student circles)
