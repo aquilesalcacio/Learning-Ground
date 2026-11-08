@@ -5,6 +5,7 @@ import { GraduationCap, PanelLeftClose, Plus, Trash2 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { TUTOR_PALETTES } from "@/lib/lg-palette";
 import {
@@ -76,7 +77,7 @@ export function AppSidebar({
       <div className="h-full w-72 p-2">
         <div className="surface-solid flex h-full flex-col rounded-[1.75rem] p-2">
           <div className="flex items-center justify-between gap-2 py-1.5 pr-1 pl-3">
-            <span className="text-[0.95rem] font-semibold tracking-tight">Learning Grounds</span>
+            <BrandLogo className="h-[1.375rem]" />
             <Button
               type="button"
               variant="ghost"
