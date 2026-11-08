@@ -25,6 +25,8 @@ export type StudentProfile = {
   courses: string;
   language: LgLanguage | "";
   struggles: string;
+  // Imported from Canvas LMS: one "Course: assignment (due ...)" per line.
+  upcoming: string;
 };
 
 // One page of the homework, in board units. Its image lives in the board's IndexedDB, not here.

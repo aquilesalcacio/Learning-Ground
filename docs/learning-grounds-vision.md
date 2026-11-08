@@ -160,7 +160,7 @@ Rehearse on a prepared calculus PDF whose regions and solutions you've checked b
 | PDF | `pdfjs-dist`, each page rendered to an image | Used by tldraw's own PDF example |
 | Math | KaTeX in a custom shape | Mature. Needs a small spike |
 | Agent framework | Pydantic AI: **deferred** | Nothing in the MVP needs it now. A single direct Gemini call handles vision |
-| Auth | None for MVP | Single demo user |
+| Auth | Auth0 (updated Nov 7) | Universal Login (Google + email) guards every page via `web/proxy.ts`; FastAPI checks RS256 access tokens in `api/auth.py` |
 
 Your Gemini decision was to leave it for later unless it causes no delay. This split respects that: the direct Gemini call runs outside the voice path, and the model inside ElevenLabs is a swappable setting. Direct use also supports the Gemini MLH entry.
 
@@ -298,6 +298,8 @@ Targets, none measured yet. Spike 1 fills in actual numbers.
 
 ## 9. Canvas LMS: research result
 
+> **Update, Sat Nov 7.** We now connect Canvas LMS through the approved route below: OAuth2 with a Developer Key, on our own Canvas LMS instance, where we're admin. FastAPI runs the flow (`api/canvas_lms.py`, routes `/canvas-lms/*`). It stores only each student's tokens, keyed by their Auth0 user, and imports name, school, courses and upcoming assignments into the Student Profile on demand. Students never paste tokens. Instructure removed API access and user tokens from Free-for-Teacher accounts on 2026-05-04, so a free teacher account can't be used. Real schools would still need to enable our Developer Key, and MDC would be the first conversation.
+
 **Result: manual Student Profile for the MVP, following your rule.** I didn't test against MDC's own instance.
 
 | Route | Verdict | Why |
@@ -342,8 +344,8 @@ Targets, none measured yet. Spike 1 fills in actual numbers.
 | 8 | **Unassigned** | Chat | 7 |
 | 9 | **Unassigned** | Chat tools: graphs, docs. Below the cut line | 8 |
 | 10 | **Unassigned** | Student Profile (manual) | none |
-| 11 | **Done** | Canvas LMS research; result is manual profile (section 9) | none |
-| 12 | **Off** | Auth0, under your rule (section 14, Q3) | none |
+| 11 | **Built Nov 7** | Canvas LMS OAuth2 import on our own instance (section 9 update) | 12 |
+| 12 | **Built Nov 7** | Auth0 login + API token checks, for the MLH "Best Use of Auth0" prize | none |
 | 13 | **Unassigned** | Seeded data + demo PDF, checked by hand | 2, 3 |
 
 **Things I noticed in the split:**

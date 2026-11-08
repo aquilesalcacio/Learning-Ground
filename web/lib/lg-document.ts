@@ -331,7 +331,9 @@ export async function readHomeworkPage(
   form.append("page", String(page));
   const timeout = AbortSignal.timeout(READ_TIMEOUT_MS);
   try {
-    const response = await fetch(`${LG_API_URL}/documents/read-page`, {
+    // Imported here so this file keeps no runtime app imports (see the top). It adds the Auth0 token.
+    const { lgApiFetch } = await import("./lg-api");
+    const response = await lgApiFetch("/documents/read-page", {
       method: "POST",
       body: form,
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
@@ -345,6 +347,9 @@ export async function readHomeworkPage(
     return { ok: true, reading };
   } catch (error) {
     if (signal?.aborted) return { ok: false, message: "Reading was stopped.", stop: true };
+    if ((error as { name?: string })?.name === "LgApiAuthError") {
+      return { ok: false, message: (error as Error).message, stop: true };
+    }
     if (timeout.aborted || (error as { name?: string })?.name === "TimeoutError") {
       return { ok: false, message: "Reading this page took too long.", stop: true };
     }

@@ -5,3 +5,4 @@
 __pycache__/
 .venv/
 api/voice/candidates*
+api/data/

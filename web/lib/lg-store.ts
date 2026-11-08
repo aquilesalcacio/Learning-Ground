@@ -32,7 +32,7 @@ const DEFAULT_STATE: LgState = {
     preset("sam", "Sam", "green", "en", "humorous"),
   ],
   active_tutor_id: "prof-ana",
-  profile: { name: "", school: "", courses: "", language: "", struggles: "" },
+  profile: { name: "", school: "", courses: "", language: "", struggles: "", upcoming: "" },
   conversations: [],
   active_conversation_id: null,
   draft_id: "",

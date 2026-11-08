@@ -1,5 +1,6 @@
 "use client";
 
+import { useUser } from "@auth0/nextjs-auth0";
 import { GraduationCap, PanelLeftClose, Plus, Trash2 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -40,6 +41,9 @@ export function AppSidebar({
   const onBoard = pathname === "/";
   const conversations = hydrated ? sortedConversations(state) : [];
   const { name, school } = state.profile;
+  const { user } = useUser();
+  // The name the student typed (or imported) wins; Auth0's is the fallback.
+  const displayName = name.trim() || user?.name?.trim() || "";
 
   function startNewChat() {
     newChat();
@@ -145,24 +149,35 @@ export function AppSidebar({
 
         <Separator />
 
-        {/* Placeholder details until login exists. This is the only way to the Student Profile. */}
+        {/* The logged-in student (Auth0). This is the only way to the Student Profile. */}
         <Link
           href="/profile"
           aria-label="Student Profile"
           aria-current={pathname.startsWith("/profile") ? "page" : undefined}
           className="flex items-center gap-2.5 p-3 outline-none hover:bg-muted focus-visible:bg-muted aria-[current=page]:bg-muted"
         >
-          <span
-            aria-hidden="true"
-            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground"
-          >
-            {(name.trim()[0] ?? "S").toUpperCase()}
-          </span>
+          {user?.picture ? (
+            // eslint-disable-next-line @next/next/no-img-element -- Auth0 avatars come from many hosts.
+            <img src={user.picture} alt="" referrerPolicy="no-referrer" className="size-8 shrink-0 rounded-full" />
+          ) : (
+            <span
+              aria-hidden="true"
+              className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground"
+            >
+              {(displayName[0] ?? "S").toUpperCase()}
+            </span>
+          )}
           <span className="min-w-0 flex-1 text-sm">
-            <span className="block truncate font-medium">{name.trim() || "Student"}</span>
+            <span className="block truncate font-medium">{displayName || "Student"}</span>
             {school.trim() && <span className="block truncate text-xs text-muted-foreground">{school.trim()}</span>}
           </span>
         </Link>
+        {user && (
+          // A full page load, not a client route: Auth0 clears the session and comes back to the start.
+          <a href="/auth/logout" className={buttonVariants({ variant: "ghost", size: "sm", className: "mx-3 mb-3" })}>
+            Log out
+          </a>
+        )}
       </div>
     </aside>
   );

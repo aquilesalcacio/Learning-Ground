@@ -12,6 +12,7 @@ export const PERSONA_MAX = 500;
 const REGION_TEXT_MAX = 600;
 const HOMEWORK_TEXT_MAX = 8000;
 const PROFILE_FIELD_MAX = 200;
+const UPCOMING_MAX = 800;
 const FILENAME_MAX = 120;
 
 const LANGUAGE_NAMES: Record<LgLanguage, string> = {
@@ -133,9 +134,11 @@ function profileSection(profile: StudentProfile): string {
     ["Courses", profile.courses],
     ["Preferred language", profile.language ? LANGUAGE_NAMES[profile.language] : ""],
     ["Finds hard", profile.struggles],
+    // Imported from Canvas LMS, so it runs longer: up to eight "Course: assignment (due ...)" lines.
+    ["Upcoming work", (profile.upcoming ?? "").split("\n").map((line) => line.trim()).filter(Boolean).join("; ")],
   ];
   const lines = fields
-    .map(([key, value]) => [key, asData(value, PROFILE_FIELD_MAX, true)] as const)
+    .map(([key, value]) => [key, asData(value, key === "Upcoming work" ? UPCOMING_MAX : PROFILE_FIELD_MAX, true)] as const)
     .filter(([, value]) => value)
     .map(([key, value]) => `${key}: ${value}`);
   if (!lines.length) return "The student hasn't filled in a profile. Learn about them as you go.";
