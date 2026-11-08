@@ -22,9 +22,10 @@ services:
   web:
     build:
       context: ../web
-      # Written into the browser code at build time.
+      # Written into the browser code at build time. web/Dockerfile stops the build if the API URL is
+      # empty, so commands that don't build (logs, ps, down) work without .env.web.
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?Set NEXT_PUBLIC_API_URL in deploy/.env.web}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
         NEXT_PUBLIC_TLDRAW_LICENSE_KEY: ${NEXT_PUBLIC_TLDRAW_LICENSE_KEY:-}
     env_file: .env.web
     ports:
