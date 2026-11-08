@@ -1,6 +1,7 @@
-# Learning Grounds on our VPS, behind the server's own nginx (docs/DEPLOY.md).
-# Both services listen on 127.0.0.1 only, so nginx is the only way in. Start it with deploy/deploy.sh,
-# which passes .env.web for the build arguments below.
+# Learning Grounds on our VPS, behind tagmephotos's nginx (docs/DEPLOY.md).
+# The published ports are on 127.0.0.1 only, for deploy.sh's health check; the public way in is
+# tagme's nginx over its network. Start it with deploy/deploy.sh, which passes .env.web for the
+# build arguments below.
 name: learning-grounds
 
 services:
@@ -12,6 +13,10 @@ services:
     volumes:
       # Canvas LMS data, kept across rebuilds.
       - api-data:/app/data
+    networks:
+      default: {}
+      proxy:
+        aliases: [lg-api]
     restart: unless-stopped
 
   web:
@@ -26,7 +31,17 @@ services:
       - "127.0.0.1:3100:3000"
     depends_on:
       - api
+    networks:
+      default: {}
+      proxy:
+        aliases: [lg-web]
     restart: unless-stopped
+
+networks:
+  # tagmephotos's network. Its nginx owns ports 80 and 443 and reaches us here (deploy/nginx.conf).
+  proxy:
+    name: tagme_default
+    external: true
 
 volumes:
   api-data:

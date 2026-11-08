@@ -1,13 +1,13 @@
 # Deploying Learning Grounds
 
-Learning Grounds runs on our Hostinger VPS (`187.77.50.15`), next to tagmephotos.com.br. It is two Docker containers built from the `main` branch, behind the server's existing nginx. Replace `<domain>` with our GoDaddy domain everywhere below.
+Learning Grounds runs on our Hostinger VPS (`187.77.50.15`), next to tagmephotos.com.br. It is two Docker containers built from the `main` branch. Our domain is `learningrounds.com`; `<domain>` below means it.
 
-| Service | Folder | Listens on | Address |
+| Service | Folder | On tagme's network | Address |
 |---|---|---|---|
-| `web` (Next.js) | `web/` | `127.0.0.1:3100` | `https://<domain>` and `https://www.<domain>` |
-| `api` (FastAPI) | `api/` | `127.0.0.1:8100` | `https://api.<domain>` |
+| `web` (Next.js) | `web/` | `lg-web:3000` | `https://<domain>` and `https://www.<domain>` |
+| `api` (FastAPI) | `api/` | `lg-api:8000` | `https://api.<domain>` |
 
-Both containers listen on the server's localhost only. nginx sends our three names to them and leaves tagmephotos.com.br's sites alone. The files are in `deploy/`: `compose.yaml`, `deploy.sh` and `nginx.conf`.
+tagmephotos's nginx (container `tagme-nginx-1`, set up in `/srv/tagme`) owns ports 80 and 443. Our containers join its Docker network, `tagme_default`, and our three sites sit in its config file between marker lines. The server's own nginx package isn't running; leave it off. Our containers also listen on `127.0.0.1:3100` and `127.0.0.1:8100`, for health checks. The files are in `deploy/`: `compose.yaml`, `deploy.sh`, `nginx.conf` and `nginx_site.py`.
 
 Work in this order: DNS first (it takes a while to spread), then the server, then the outside services.
 
@@ -28,10 +28,10 @@ Turn off any domain forwarding on the domain, since it overrides these records. 
 In a root shell on the VPS (hPanel's Browser terminal, or `ssh root@187.77.50.15`):
 
 ```bash
-docker compose version || curl -fsSL https://get.docker.com | sh   # Docker, if it isn't there yet
-certbot --version || apt-get install -y certbot python3-certbot-nginx
 git clone https://github.com/aquilesalcacio/Learning-Ground.git /opt/learning-grounds
 ```
+
+Docker and certbot are already on the server for tagmephotos. Don't reinstall Docker: the installer can restart it, and tagmephotos with it.
 
 ## 3. The environment files
 
@@ -59,16 +59,19 @@ It pulls `main`, builds both images, starts them and waits until both answer. Th
 
 ## 5. nginx and HTTPS
 
-On the server, after DNS resolves:
+On the server, after DNS resolves. First the certificate: tagme's nginx already answers Let's Encrypt's checks for any name from `/var/www/certbot`, so this needs no nginx change. Certbot renews it with tagmephotos's certificate.
 
 ```bash
-sed 's/DOMAIN/<domain>/g' /opt/learning-grounds/deploy/nginx.conf > /etc/nginx/sites-available/learning-grounds
-ln -s /etc/nginx/sites-available/learning-grounds /etc/nginx/sites-enabled/learning-grounds
-nginx -t && systemctl reload nginx
-certbot --nginx --redirect -d <domain> -d www.<domain> -d api.<domain>
+certbot certonly --webroot -w /var/www/certbot -d <domain> -d www.<domain> -d api.<domain>
 ```
 
-`nginx -t` checks the whole configuration first. If it fails, nginx keeps running with the old one, and tagmephotos.com.br isn't affected. Certbot adds the certificates and the redirect to HTTPS to our file only, and renews them with the server's other certificates. If the server keeps its sites in `/etc/nginx/conf.d/` instead, write the file to `/etc/nginx/conf.d/learning-grounds.conf` and skip the `ln` line.
+Then add our sites to tagme's nginx:
+
+```bash
+python3 /opt/learning-grounds/deploy/nginx_site.py install <domain>
+```
+
+The script puts `deploy/nginx.conf` into `/srv/tagme/nginx/nginx.conf` between marker lines, and keeps the file as it was before as `nginx.conf.before-learning-grounds`. It tests the whole config inside the container, and reloads nginx only if the test passes. Otherwise it puts the old file back, so tagmephotos keeps running as before. Run it again after changing `deploy/nginx.conf`, and use `nginx_site.py remove` to take our sites out. Since the change is in tagme's folder, keep it in mind when changing tagmephotos's nginx file.
 
 Then open `https://api.<domain>/health`. It should show `{"status":"ok"}`.
 
@@ -124,4 +127,4 @@ Push to `main`, then run `ssh root@187.77.50.15 /opt/learning-grounds/deploy/dep
 - **Container logs:** `docker compose -f /opt/learning-grounds/deploy/compose.yaml logs --tail 100 web` (or `api`).
 - **The web build is killed (exit code 137):** the server ran out of memory. Add swap once, then deploy again: `fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab`.
 - **502 Bad Gateway:** the container for that address isn't running. Check the logs, then run `deploy.sh` again.
-- **Take Learning Grounds offline** without touching anything else: `rm /etc/nginx/sites-enabled/learning-grounds && nginx -t && systemctl reload nginx`, then `docker compose -f /opt/learning-grounds/deploy/compose.yaml down`.
+- **Take Learning Grounds offline** without touching anything else: `python3 /opt/learning-grounds/deploy/nginx_site.py remove`, then `docker compose -f /opt/learning-grounds/deploy/compose.yaml down`.
