@@ -2,8 +2,9 @@
 
     uv run uvicorn main:app --reload --port 8000
 
-Endpoints: POST /check-work (Check my work), POST /documents/read-page (homework pages), and the
-Canvas LMS connection under /canvas-lms/*. Every endpoint except /health and the Canvas LMS callback
+Endpoints: POST /check-work (Check my work), POST /documents/read-page (homework pages),
+POST /voice/session (a one-time credential for a tutor session), and the Canvas LMS connection
+under /canvas-lms/*. Every endpoint except /health and the Canvas LMS callback
 needs an Auth0 access token (see auth.py).
 
 Run from api/. Reads its keys from api/.env.
@@ -32,6 +33,7 @@ from canvas_lms import CanvasLmsConfigError, CanvasLmsError, CanvasLmsNotConnect
 from check_work import CheckWorkError, Language, WorkCheck, check_work
 from read_page import MAX_IMAGE_BYTES as MAX_PAGE_BYTES
 from read_page import BadImageError, PageReading, ReadPageError, read_page
+from voice_session import VoiceSession, VoiceSessionConfigError, VoiceSessionError, start_session
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("learning_grounds.api")
@@ -60,6 +62,18 @@ def image_mime_type(data: bytes) -> str | None:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/voice/session")
+async def post_voice_session(user: User, text_only: Annotated[bool, Body(embed=True)] = False) -> VoiceSession:
+    """A one-time ElevenLabs credential: a conversation token for voice, a signed URL for text."""
+    try:
+        return await start_session(text_only)
+    except VoiceSessionConfigError as error:
+        log.error("voice isn't configured: %s", error)
+        raise HTTPException(503, "The tutor isn't set up on the server yet.") from error
+    except VoiceSessionError as error:
+        raise HTTPException(502, str(error)) from error
 
 
 @app.post("/check-work")

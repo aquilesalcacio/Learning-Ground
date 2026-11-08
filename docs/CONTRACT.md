@@ -15,10 +15,10 @@ uv run uvicorn main:app --reload --port 8000
 
 | File | Setting | Where it comes from |
 |---|---|---|
-| `web/.env.local` | `NEXT_PUBLIC_ELEVENLABS_AGENT_ID` | Ask Lorenzo |
-| `api/.env` | `ELEVENLABS_API_KEY`, `GEMINI_API_KEY` | Ask Lorenzo, or use your own Gemini key |
+| `api/.env` | `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, `GEMINI_API_KEY`, and the Auth0 and Canvas LMS settings in `api/.env.example` | Ask Lorenzo, or use your own Gemini key |
+| `web/.env.local` | `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`, `AUTH0_SECRET`, `AUTH0_AUDIENCE`, `APP_BASE_URL`, and optionally `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`) and `NEXT_PUBLIC_TLDRAW_LICENSE_KEY` | Ask Lorenzo |
 
-Never commit these files. Without the agent ID, the panel shows an error when you start a session, and everything else still runs.
+Never commit these files. A tutor session starts from a one-time credential the API gets from ElevenLabs (`POST /voice/session`), so the API must be running to talk to the tutor. The web app no longer reads `NEXT_PUBLIC_ELEVENLABS_AGENT_ID`. Deploying is in [DEPLOY.md](DEPLOY.md).
 
 ## What the UI must keep
 
@@ -30,7 +30,7 @@ Never commit these files. Without the agent ID, the panel shows an error when yo
    | `status` | `idle`, `connecting`, `listening` or `speaking` |
    | `connected`, `textOnly` | Whether a session is live, and whether it's a text-only session |
    | `error` | Message to show when a session fails |
-   | `start(tutor, textOnly)`, `end()` | Start and end a session. `start` returns false when no session could start |
+   | `start(tutor, textOnly)`, `end()` | Start and end a session. `start` asks the API for a session credential first, and shows `error` if it can't get one. It always returns true |
    | `restartSession(tutor, textOnly)`, `switchTutor(tutor, textOnly)` | Replace the live session, such as to switch from text to voice or to another tutor |
    | `sendWhenReady(message)` | Send a typed message now, or when the connecting session opens. Typed messages aren't reported to `onLine`, so add them to the chat yourself |
    | `sendContextualUpdate(message)` | Background information the tutor uses but doesn't reply to. A connecting session gets it once it opens. Returns false and drops it when no session is live or connecting |
@@ -140,11 +140,12 @@ If a reopened board has the document but not its page images, for example after 
 
 ## API endpoints
 
-Both take multipart form data and answer errors as `{ "detail": string }`. A 422 has `detail` as an array, so check its type before showing it.
+The image endpoints take multipart form data. All answer errors as `{ "detail": string }`. A 422 has `detail` as an array, so check its type before showing it.
 
 | Endpoint | Fields | Returns |
 |---|---|---|
 | `POST /check-work` | `image` (PNG snapshot), `label`, `language` (optional: `pt`, `es` or `en`) | `{ status, student_wrote, analysis, hint }` |
+| `POST /voice/session` | JSON `{ "text_only": bool }` | `{ conversation_token, signed_url }`: a token for a voice call (WebRTC) or a signed URL for a text chat (WebSocket); the other is null. 503 when the API has no ElevenLabs key or agent ID, 502 when ElevenLabs refuses |
 | `POST /documents/read-page` | `image` (PNG, JPEG or WEBP, up to 10 MB), `language` (`pt`, `es` or `en`), `page` (1 to 999) | `{ page, page_text, problems: [{ label, box_2d, text }] }`. `problems` may be empty |
 
 `read-page` errors are 413 (too large), 415 (wrong type), 400 (corrupt image) and 502 (Gemini busy or failed, with a message safe to show the student). A page takes about 15 s and up to about 60 s, so the web app waits up to 90 s.

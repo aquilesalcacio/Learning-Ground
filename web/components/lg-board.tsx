@@ -37,12 +37,17 @@ const components: TLComponents = {
 // The tutor's equations. Boards saved with one need this util to load, so it stays registered.
 const shapeUtils: TLAnyShapeUtilConstructor[] = [LgMathShapeUtil];
 
+// tldraw needs a license key on any domain but localhost. It's public by design: tldraw ties it to
+// our domain. Without it, a deployed board shows tldraw's licence notice.
+const licenseKey = process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY || undefined;
+
 // tldraw only appears here and in lib/lg-actions.ts, which keeps a library switch contained.
 // Each chat saves its own board in the browser, under its own key.
 export default function LgBoard({ boardId }: { boardId: string }) {
   return (
     <div className="absolute inset-0">
       <Tldraw
+        licenseKey={licenseKey}
         components={components}
         shapeUtils={shapeUtils}
         persistenceKey={boardPersistenceKey(boardId)}

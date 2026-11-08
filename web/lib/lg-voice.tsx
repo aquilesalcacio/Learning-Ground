@@ -8,18 +8,17 @@ import {
   useConversationMode,
   useConversationStatus,
 } from "@elevenlabs/react";
-import { type ReactNode, useCallback, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { applyLgAction, askLgQuestion, doneLookingAtLgWork, type LgAction, lookAtLgWork } from "./lg-actions";
+import { LgApiAuthError, lgApiFetch } from "./lg-api";
 import { checkStudentWork, type WorkCheck, type WorkCheckOutcome, workReport } from "./lg-check-work";
+import { apiErrorMessage } from "./lg-document";
 import { parseNumber, parseNumberLineMarks } from "./lg-ink";
 import { getActiveConversation, getActiveDocument, getBoardQuestions, readLgState } from "./lg-store";
 import { penInterrupted, setPenVoice } from "./lg-tutor-pen";
 import { buildTutorPrompt, type LgHomeworkContext, resolveLanguage, toneVoiceSettings } from "./lg-tutor-prompt";
 import { findVoice } from "./lg-voices";
 import type { ChatSpeaker, LgDocument, Tutor } from "./lg-types";
-
-// Temporary for the G1 test: a public agent needs only its ID. T-203 replaces this with a server token.
-const AGENT_ID = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID ?? "";
 
 const SILENT_TURN = /^[\s.…]*$/;
 
@@ -114,8 +113,34 @@ export function homeworkContext(document: LgDocument | null): LgHomeworkContext 
   return { filename: document.filename, regions };
 }
 
+// Each session starts from a one-time credential that our API gets from ElevenLabs (T-203). The agent
+// requires auth, so its ID alone starts nothing, and the API key never reaches the browser.
+// A voice call gets a conversation token (WebRTC), a text chat a signed URL (WebSocket).
+type SessionCredential = { conversationToken: string } | { signedUrl: string };
+
+const START_FAILED = "The tutor couldn't start. Please try again.";
+
+// A credential, or the message to show when there's none.
+async function sessionCredential(textOnly: boolean): Promise<SessionCredential | string> {
+  try {
+    const response = await lgApiFetch("/voice/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text_only: textOnly }),
+    });
+    if (!response.ok) return await apiErrorMessage(response, START_FAILED);
+    const body = (await response.json()) as { conversation_token?: string | null; signed_url?: string | null };
+    if (textOnly && body.signed_url) return { signedUrl: body.signed_url };
+    if (!textOnly && body.conversation_token) return { conversationToken: body.conversation_token };
+    return START_FAILED;
+  } catch (error) {
+    if (error instanceof LgApiAuthError) return error.message;
+    return "The tutor can't reach the server. Check your connection and try again.";
+  }
+}
+
 // Read when each session starts, so tutor edits, the profile and homework apply to the next one.
-function sessionOptions({ tutor, textOnly }: SessionRequest) {
+function sessionOptions({ tutor, textOnly }: SessionRequest, credential: SessionCredential) {
   const state = readLgState();
   const language = resolveLanguage(tutor, state.profile);
   const voice = findVoice(language, tutor.voice_id);
@@ -127,7 +152,7 @@ function sessionOptions({ tutor, textOnly }: SessionRequest) {
     getBoardQuestions(state).map(({ id, text: question }) => ({ id, text: question })),
   );
   return {
-    agentId: AGENT_ID,
+    ...credential,
     textOnly,
     // Tags such as [laughs] are spoken as expression and never shown in the transcript.
     stripAudioTags: true,
@@ -167,6 +192,11 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
   const [checking, setChecking] = useState(false);
   const [textOnly, setTextOnly] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  // Waiting for the API's credential, before the SDK starts connecting.
+  const [preparing, setPreparing] = useState(false);
+  // Counts session starts, so a start that was ended, replaced or left behind while it was still
+  // preparing never opens.
+  const attempt = useRef(0);
   // A text-only reply as it streams in, before onMessage records it.
   const [streamingLine, setStreamingLine] = useState("");
   const restart = useRef<SessionRequest | null>(null);
@@ -216,7 +246,7 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
       setRestarting(false);
       // Language is fixed for a call, so a tutor switch ends the session and starts a new one.
       if (next) {
-        conversation.startSession(sessionOptions(next));
+        void launch(next);
       } else {
         pendingText.current = [];
         pendingContext.current = [];
@@ -232,21 +262,44 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
     ? conversation.isSpeaking
       ? "speaking"
       : "listening"
-    : conversation.status === "connecting" || restarting
+    : conversation.status === "connecting" || restarting || preparing
       ? "connecting"
       : "idle";
 
-  // Returns false when no session could be started.
-  function start(tutor: Tutor, nextTextOnly: boolean) {
-    if (!AGENT_ID) {
-      setError("NEXT_PUBLIC_ELEVENLABS_AGENT_ID is missing from web/.env.local.");
-      return false;
+  // A dock that goes away mid-start leaves that start behind.
+  useEffect(
+    () => () => {
+      attempt.current += 1;
+    },
+    [],
+  );
+
+  // Gets a credential from the API, then opens the session. A failure shows as the error, and
+  // drops what was waiting to be sent.
+  async function launch(request: SessionRequest) {
+    attempt.current += 1;
+    const mine = attempt.current;
+    setPreparing(true);
+    const credential = await sessionCredential(request.textOnly);
+    if (mine !== attempt.current) return;
+    setPreparing(false);
+    if (typeof credential === "string") {
+      pendingText.current = [];
+      pendingContext.current = [];
+      setError(credential);
+      return;
     }
+    conversation.startSession(sessionOptions(request, credential));
+  }
+
+  // Always true: a session that can't start shows its error instead. Kept for the dock, which
+  // keeps a typed draft only when this returns false.
+  function start(tutor: Tutor, nextTextOnly: boolean) {
     setError("");
     setTextOnly(nextTextOnly);
     setPenVoice({ textOnly: nextTextOnly });
     onLine("system", `Session started with ${tutor.name || "Unnamed tutor"}.`);
-    conversation.startSession(sessionOptions({ tutor, textOnly: nextTextOnly }));
+    void launch({ tutor, textOnly: nextTextOnly });
     return true;
   }
 
@@ -274,6 +327,11 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
     setError("");
     setTextOnly(nextTextOnly);
     setPenVoice({ textOnly: nextTextOnly });
+    // Still waiting for a credential: there's no session to end yet, so this one starts instead.
+    if (preparing) {
+      void launch({ tutor, textOnly: nextTextOnly });
+      return;
+    }
     setRestarting(true);
     restart.current = { tutor, textOnly: nextTextOnly };
     endSession();
@@ -303,10 +361,12 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
   }
 
   const end = useCallback(() => {
+    attempt.current += 1;
     restart.current = null;
     pendingText.current = [];
     pendingContext.current = [];
     setRestarting(false);
+    setPreparing(false);
     endSession();
   }, [endSession]);
 
