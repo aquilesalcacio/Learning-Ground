@@ -1,7 +1,7 @@
 // Where the homework sits on the board, read from the open document (plan B3).
 // This is the only module that converts box_2d into board positions.
 // Type-only imports keep it runnable under `node --test` without a bundler.
-import type { LgDocument, LgDocumentFile, LgDocumentPage, LgRegion } from "./lg-types";
+import type { LgDocument, LgDocumentFile, LgDocumentPage, LgRegion, LgRegionLine } from "./lg-types";
 
 export type { LgRegion };
 
@@ -21,6 +21,10 @@ const WHOLE_PAGE: LgBox = [0, 0, SCALE, SCALE];
 const REGION_TEXT_MAX = 600;
 const PAGE_TEXT_MAX = 4000;
 const LABEL_MAX = 40;
+// A problem's lines repeat its text, so they get the same budgets: REGION_TEXT_MAX per problem
+// and PAGE_TEXT_MAX per page, at most LINES_MAX lines of LINE_TEXT_MAX characters each.
+const LINES_MAX = 12;
+const LINE_TEXT_MAX = 160;
 
 // Board size for a rendered page of pixelW x pixelH.
 export function boardPageSize(pixelW: number, pixelH: number): { w: number; h: number } {
@@ -153,6 +157,37 @@ export function regionWorkBounds(document: LgDocument, item: LgRegion): LgBounds
   return boxBounds(pageOf(document, item), workingBox(document.regions, item));
 }
 
+function holds(area: LgBounds, point: { x: number; y: number }) {
+  return point.x >= area.x && point.x <= area.x + area.w && point.y >= area.y && point.y <= area.y + area.h;
+}
+
+// How far a point is from the left-to-right run of a problem's printed box: 0 when it's under it.
+function sideways(document: LgDocument, item: LgRegion, point: { x: number; y: number }) {
+  const bounds = regionBounds(document, item);
+  return Math.max(bounds.x - point.x, point.x - (bounds.x + bounds.w), 0);
+}
+
+// The problem at a board point: the one printed there, or else the one whose working area holds
+// it, so writing under a problem belongs to it. Working areas cross the whole page, so for
+// problems side by side the printed box decides: on it, or else under it or nearest beside it.
+// The margin beside the page is no problem's.
+export function regionAt(document: LgDocument | null, point: { x: number; y: number }): LgRegion | undefined {
+  if (!document) return undefined;
+  const printed = document.regions.find((item) => holds(regionBounds(document, item), point));
+  if (printed) return printed;
+  let best: LgRegion | undefined;
+  let bestDistance = Infinity;
+  for (const item of document.regions) {
+    if (!holds(regionWorkBounds(document, item), point)) continue;
+    const distance = sideways(document, item, point);
+    if (distance < bestDistance) {
+      best = item;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
 // Tutor text goes in a margin beside the page. Focus always keeps that margin on screen.
 export const MARGIN_WIDTH = 300;
 const MARGIN_GAP = 32;
@@ -179,7 +214,7 @@ export function regionMarginX(document: LgDocument, item: LgRegion): number {
 
 // Building regions from what /documents/read-page returns.
 
-export type LgPageProblem = { label: string; box_2d: number[]; text: string };
+export type LgPageProblem = { label: string; box_2d: number[]; text: string; lines?: { text: string; box_2d: number[] }[] };
 
 function cap(text: string, max: number): string {
   const clean = text.trim();
@@ -204,19 +239,218 @@ export function wholePageRegion(page: number, text = ""): LgRegion {
   return { region_id: `p${page}.page`, label: `Page ${page}`, page, box_2d: [...WHOLE_PAGE], text: cap(text, PAGE_TEXT_MAX) };
 }
 
+// A problem's usable lines: a valid box and some text, within the budgets above. The page's
+// budget is passed in and what these lines use is returned with them. A line is kept whole or
+// not at all, since a phrase's place on it is estimated from its text across its whole box: a
+// line too long is skipped, and the lines stop at the first one the budget can't hold.
+function problemLines(lines: LgPageProblem["lines"], pageBudget: number): { lines: LgRegionLine[]; used: number } {
+  const kept: LgRegionLine[] = [];
+  let budget = Math.min(REGION_TEXT_MAX, pageBudget);
+  for (const line of Array.isArray(lines) ? lines : []) {
+    if (kept.length === LINES_MAX || budget <= 0) break;
+    const box = validBox(Array.isArray(line?.box_2d) ? line.box_2d : []);
+    const text = String(line?.text ?? "").replace(/\s+/g, " ").trim();
+    if (!box || !text || text.length > LINE_TEXT_MAX) continue;
+    if (text.length > budget) break;
+    budget -= text.length;
+    kept.push({ text, box_2d: box });
+  }
+  return { lines: kept, used: Math.min(REGION_TEXT_MAX, pageBudget) - budget };
+}
+
 // IDs are p{page}.q{k}, numbered in reading order on that page. No usable box gives p{page}.page.
 export function pageRegions(page: number, problems: LgPageProblem[], pageText = ""): LgRegion[] {
   const regions: LgRegion[] = [];
   let budget = PAGE_TEXT_MAX;
+  let lineBudget = PAGE_TEXT_MAX;
   for (const problem of problems) {
     const box = validBox(problem.box_2d);
     if (!box) continue;
     const k = regions.length + 1;
     const text = cap(problem.text, Math.min(REGION_TEXT_MAX, Math.max(budget, 0)));
     budget -= text.length;
-    regions.push({ region_id: `p${page}.q${k}`, label: problemLabel(problem.label, k), page, box_2d: box, text });
+    const { lines, used } = problemLines(problem.lines, lineBudget);
+    lineBudget -= used;
+    regions.push({
+      region_id: `p${page}.q${k}`,
+      label: problemLabel(problem.label, k),
+      page,
+      box_2d: box,
+      text,
+      ...(lines.length ? { lines } : {}),
+    });
   }
   return regions.length ? regions : [wholePageRegion(page, pageText)];
+}
+
+// Marking an exact phrase: the tutor names words from a problem's text, and these find the line
+// that holds them and estimate where on that line they fall. Both sides are compared without
+// spaces, case or accents, so "2x+6=14" finds "2x + 6 = 14", but with their math symbols, so "1/2"
+// never finds "12" and "x - 3" never finds "x = 3". A longer phrase may be off by a character in
+// five, as when Gemini read a word slightly differently.
+const PHRASE_MAX = 120;
+const FUZZY_MIN = 5;
+const FUZZY_SHARE = 0.2;
+
+// Math symbols are compared too. Look-alikes count as the plain symbol: a minus sign or a dash as
+// "-", a times sign as "*", a division sign or a fraction slash as "/".
+const MATH_SYMBOLS = new Set(".,/:+-=<>%^()[]*≤≥≠");
+const LOOK_ALIKES: Record<string, string> = {
+  "\u2212": "-",
+  "\u2013": "-",
+  "\u2014": "-",
+  "×": "*",
+  "·": "*",
+  "÷": "/",
+  "\u2044": "/",
+  "\u2215": "/",
+};
+const plainSymbol = (char: string) => LOOK_ALIKES[char] ?? char;
+const isAlphanumeric = (char: string) => /[0-9]/.test(char) || char.toLowerCase() !== char.toUpperCase();
+// Inside a number such as 2.5, 1,200 or 1/2, or a power such as x^2, these join it into one word.
+const JOINERS = new Set(".,/^");
+
+// Letters, digits and math symbols, each with the index of the character it came from.
+function comparable(text: string): { chars: string[]; from: number[] } {
+  const chars: string[] = [];
+  const from: number[] = [];
+  Array.from(text).forEach((char, index) => {
+    const plain = plainSymbol(char);
+    // Kept as they are: NFKD would turn ≠ into =.
+    if (MATH_SYMBOLS.has(plain)) {
+      chars.push(plain);
+      from.push(index);
+      return;
+    }
+    // NFKD splits accents off and turns ² into 2 and ½ into 1⁄2; the accents are then dropped.
+    for (const part of char.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()) {
+      const symbol = plainSymbol(part);
+      if (isAlphanumeric(symbol) || MATH_SYMBOLS.has(symbol)) {
+        chars.push(symbol);
+        from.push(index);
+      }
+    }
+  });
+  return { chars, from };
+}
+
+// A phrase's characters, without the punctuation that ends a sentence or a clause around it, which
+// the tutor may copy or leave out.
+function phraseChars(phrase: string): string[] {
+  const chars = comparable(phrase).chars;
+  while (chars.length && ".,:;".includes(chars[chars.length - 1])) chars.pop();
+  while (chars.length && ",:;".includes(chars[0])) chars.shift();
+  return chars;
+}
+
+// Where words start, for a run of characters with their places: breaks[k] is true when a space or
+// a line break comes before character k, or when k is where letters and digits meet a symbol, as
+// in "x=3" or "(5)". A joiner inside a number, as in "2.5", is part of it, so "5" there isn't whole.
+function wordBreaks(chars: string[], places: { line: number; index: number }[]): boolean[] {
+  const next = (k: number) => k + 1 < places.length && places[k + 1].line === places[k].line && places[k + 1].index === places[k].index + 1;
+  const prev = (k: number) => k > 0 && next(k - 1);
+  const wordy = (k: number) =>
+    isAlphanumeric(chars[k]) ||
+    (JOINERS.has(chars[k]) && prev(k) && next(k) && isAlphanumeric(chars[k - 1]) && isAlphanumeric(chars[k + 1]));
+  return places.map((_, k) => !prev(k) || wordy(k - 1) !== wordy(k));
+}
+
+// Where the phrase best matches inside the text, as [start, end) in its characters, or null.
+// Exact first, preferring one that starts and ends where words do (breaks[k]: a space or a line
+// break comes before character k), so "5" finds "gives 5" before "15"; otherwise the substring
+// with the fewest edits (Sellers' algorithm), if few enough.
+function findPhrase(text: string[], phrase: string[], breaks: boolean[]): [number, number] | null {
+  const m = phrase.length;
+  if (!m || !text.length) return null;
+  let first: [number, number] | null = null;
+  for (let at = 0; at + m <= text.length; at += 1) {
+    if (!phrase.every((char, index) => text[at + index] === char)) continue;
+    if (breaks[at] && (at + m === text.length || breaks[at + m])) return [at, at + m];
+    first ??= [at, at + m];
+  }
+  if (first) return first;
+  if (m < FUZZY_MIN) return null;
+  const allowed = Math.floor(m * FUZZY_SHARE);
+  // cost[j] and start[j]: the fewest edits matching the phrase so far to text ending at j.
+  let cost = Array.from({ length: text.length + 1 }, () => 0);
+  let start = Array.from({ length: text.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i += 1) {
+    const nextCost = [i];
+    const nextStart = [0];
+    for (let j = 1; j <= text.length; j += 1) {
+      const swap = cost[j - 1] + (phrase[i - 1] === text[j - 1] ? 0 : 1);
+      const skipPhrase = cost[j] + 1;
+      const skipText = nextCost[j - 1] + 1;
+      if (swap <= skipPhrase && swap <= skipText) {
+        nextCost.push(swap);
+        nextStart.push(start[j - 1]);
+      } else if (skipPhrase <= skipText) {
+        nextCost.push(skipPhrase);
+        nextStart.push(start[j]);
+      } else {
+        nextCost.push(skipText);
+        nextStart.push(nextStart[j - 1]);
+      }
+    }
+    cost = nextCost;
+    start = nextStart;
+  }
+  let best = -1;
+  for (let j = 1; j <= text.length; j += 1) if (best < 0 || cost[j] < cost[best]) best = j;
+  if (best < 0 || cost[best] > allowed || start[best] >= best) return null;
+  return [start[best], best];
+}
+
+// How wide a character is next to an average one, roughly, in a printed font.
+function charWidth(char: string): number {
+  if (/\s/.test(char)) return 0.5;
+  if (/[.,:;'!|ilj]/.test(char)) return 0.4;
+  if (/[()[\]{}\-/frtI1]/.test(char)) return 0.6;
+  if (/[mwMW]/.test(char)) return 1.4;
+  return 1;
+}
+
+// The part of a line from character `from` up to `to`, by the widths of the characters before
+// each, with half a character to spare on both sides.
+function lineSpan(line: LgRegionLine, from: number, to: number): LgBox {
+  const [ymin, xmin, ymax, xmax] = line.box_2d;
+  const widths = Array.from(line.text).map(charWidth);
+  const total = widths.reduce((sum, width) => sum + width, 0) || 1;
+  const before = (end: number) => widths.slice(0, end).reduce((sum, width) => sum + width, 0);
+  const unit = (xmax - xmin) / total;
+  const left = Math.max(xmin, xmin + before(from) * unit - unit / 2);
+  const right = Math.min(xmax, xmin + before(to) * unit + unit / 2);
+  return [ymin, left, ymax, Math.max(right, Math.min(xmax, left + unit))];
+}
+
+// The boxes, in box_2d units, that hold a phrase from the problem: one per line it runs across.
+// Empty when the problem has no lines, read before they were, or the phrase isn't found.
+export function phraseBoxes(item: Pick<LgRegion, "lines">, phrase: string): LgBox[] {
+  const lines = item.lines ?? [];
+  const wanted = phraseChars(String(phrase ?? "").slice(0, PHRASE_MAX));
+  if (!lines.length || !wanted.length) return [];
+  // The problem's lines as one run of characters, each knowing its line and its place there.
+  const chars: string[] = [];
+  const places: { line: number; index: number }[] = [];
+  lines.forEach((line, lineIndex) => {
+    const { chars: lineChars, from } = comparable(line.text);
+    chars.push(...lineChars);
+    places.push(...from.map((index) => ({ line: lineIndex, index })));
+  });
+  const found = findPhrase(chars, wanted, wordBreaks(chars, places));
+  if (!found) return [];
+  const spans = new Map<number, { from: number; to: number }>();
+  for (const { line, index } of places.slice(found[0], found[1])) {
+    const span = spans.get(line);
+    spans.set(line, span ? { from: span.from, to: index + 1 } : { from: index, to: index + 1 });
+  }
+  return [...spans].map(([line, span]) => lineSpan(lines[line], span.from, span.to));
+}
+
+// The same boxes in board positions, for underlining or highlighting just that phrase.
+export function phraseBounds(document: LgDocument, item: LgRegion, phrase: string): LgBounds[] {
+  const page = pageOf(document, item);
+  return phraseBoxes(item, phrase).map((box) => boxBounds(page, box));
 }
 
 // Swaps one page's regions in the document's list, keeping page order.

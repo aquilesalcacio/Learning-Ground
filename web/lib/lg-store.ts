@@ -8,16 +8,20 @@ import type {
   ChatSpeaker,
   Conversation,
   LgBoardQuestion,
+  LgBoardSelection,
   LgDocument,
   StudentProfile,
   Tutor,
   WorkCheckRecord,
 } from "./lg-types";
+import { DEFAULT_TUTOR_ID, migrateLgState, PRESET_TUTORS, PRESETS_VERSION } from "./lg-presets";
 
 // Browser-only storage for the mock. FastAPI and Postgres replace this later.
 const STORAGE_KEY = "lg-state-v1";
 
 const TITLE_MAX = 48;
+const PRACTICE_HISTORY_MAX = 10;
+const BOARD_ITEMS_MAX = 20;
 
 export type LgState = {
   tutors: Tutor[];
@@ -30,25 +34,20 @@ export type LgState = {
   // so whatever the student draws there carries over when the chat begins.
   draft_id: string;
   canvas_lms: CanvasLmsInfo | null;
+  // Which starter tutors this save has seen (lg-presets.ts). A save without it is version 1.
+  presets_version: number;
 };
 
-function preset(id: string, name: string, color: Tutor["color"], language: Tutor["language"], tone: Tutor["tone"]): Tutor {
-  return { id, name, color, language, tone, voice_id: "", style: "", persona_prompt: "", is_preset: true };
-}
-
 const DEFAULT_STATE: LgState = {
-  // The three presets suggested in the vision doc, section 4.2.
-  tutors: [
-    preset("prof-ana", "Prof. Ana", "blue", "pt", "casual"),
-    preset("don-mateo", "Don Mateo", "red", "es", "formal"),
-    preset("sam", "Sam", "green", "en", "humorous"),
-  ],
-  active_tutor_id: "prof-ana",
+  // The three presets from the vision doc, section 4.2.
+  tutors: [...PRESET_TUTORS],
+  active_tutor_id: DEFAULT_TUTOR_ID,
   profile: { name: "", school: "", courses: "", language: "", struggles: "", upcoming: "" },
   conversations: [],
   active_conversation_id: null,
   draft_id: "",
   canvas_lms: null,
+  presets_version: PRESETS_VERSION,
 };
 
 let cached: LgState | null = null;
@@ -56,19 +55,22 @@ const listeners = new Set<() => void>();
 
 export function readLgState(): LgState {
   if (cached) return cached;
+  let migrated = false;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    const saved = raw ? JSON.parse(raw) : null;
+    const parsed = raw ? JSON.parse(raw) : null;
+    // Before the defaults are merged in, or their presets_version would hide an old save.
+    const saved = migrateLgState(parsed);
+    migrated = saved !== parsed;
     // Profiles saved before a field existed get its default instead of undefined.
     cached = saved ? { ...DEFAULT_STATE, ...saved, profile: { ...DEFAULT_STATE.profile, ...saved.profile } } : DEFAULT_STATE;
   } catch {
     cached = DEFAULT_STATE;
   }
   const loaded = cached as LgState;
-  if (!loaded.draft_id) {
-    cached = { ...loaded, draft_id: crypto.randomUUID() };
-    saveLgState(cached);
-  }
+  if (!loaded.draft_id) cached = { ...loaded, draft_id: crypto.randomUUID() };
+  // Saved without notifying anyone: this runs during render.
+  if (migrated || !loaded.draft_id) saveLgState(cached as LgState);
   return cached as LgState;
 }
 
@@ -332,7 +334,8 @@ export function findBoardQuestion(state: LgState, id: string): LgBoardQuestion |
   return getBoardQuestions(state).find((question) => question.id === id);
 }
 
-// Adds a question under the next free ID (q1, q2, ...) and returns it.
+// Adds a question under the next free ID (q1, q2, ...) and returns it. Its text also goes in the
+// chat's practice history, which clear leaves alone.
 export function addBoardQuestion(conversation_id: string, make: (id: string) => LgBoardQuestion): LgBoardQuestion | null {
   const conversation = readLgState().conversations.find((item) => item.id === conversation_id);
   if (!conversation) return null;
@@ -341,7 +344,8 @@ export function addBoardQuestion(conversation_id: string, make: (id: string) => 
   updateConversation(conversation_id, (item) => ({
     ...item,
     board_question_count: count,
-    board_questions: [...(item.board_questions ?? []), question].slice(-20),
+    board_questions: [...(item.board_questions ?? []), question].slice(-BOARD_ITEMS_MAX),
+    practice_history: [...(item.practice_history ?? []), question.text].slice(-PRACTICE_HISTORY_MAX),
   }));
   return question;
 }
@@ -353,7 +357,55 @@ export function updateBoardQuestion(conversation_id: string, id: string, patch: 
   }));
 }
 
-// The tutor cleared its marks, so its questions are gone from the board too.
-export function clearBoardQuestions(conversation_id: string) {
-  updateConversation(conversation_id, (item) => (item.board_questions?.length ? { ...item, board_questions: [] } : item));
+// The tutor cleared its marks, so these questions are gone from the board too. Only the ones that
+// were there when it asked: a question it writes straight after clear must survive the fade-out.
+export function clearBoardQuestions(conversation_id: string, ids: readonly string[]) {
+  if (!ids.length) return;
+  updateConversation(conversation_id, (item) =>
+    item.board_questions?.some((question) => ids.includes(question.id))
+      ? { ...item, board_questions: item.board_questions.filter((question) => !ids.includes(question.id)) }
+      : item,
+  );
+}
+
+// Spots the student circled on the open chat's board (lg-actions.ts saves them).
+export function getBoardSelections(state: LgState): LgBoardSelection[] {
+  return getActiveConversation(state)?.board_selections ?? [];
+}
+
+export function findBoardSelection(state: LgState, id: string): LgBoardSelection | undefined {
+  return getBoardSelections(state).find((selection) => selection.id === id);
+}
+
+// Adds a circled spot under the next free ID (s1, s2, ...) and returns it. The oldest go past 20.
+export function addBoardSelection(conversation_id: string, make: (id: string) => LgBoardSelection): LgBoardSelection | null {
+  const conversation = readLgState().conversations.find((item) => item.id === conversation_id);
+  if (!conversation) return null;
+  const count = (conversation.board_selection_count ?? 0) + 1;
+  const selection = make(`s${count}`);
+  updateConversation(conversation_id, (item) => ({
+    ...item,
+    board_selection_count: count,
+    board_selections: [...(item.board_selections ?? []), selection].slice(-BOARD_ITEMS_MAX),
+  }));
+  return selection;
+}
+
+// The tutor cleared the board, which takes the student's circles with it.
+export function clearBoardSelections(conversation_id: string, ids: readonly string[]) {
+  if (!ids.length) return;
+  updateConversation(conversation_id, (item) =>
+    item.board_selections?.some((selection) => ids.includes(selection.id))
+      ? { ...item, board_selections: item.board_selections.filter((selection) => !ids.includes(selection.id)) }
+      : item,
+  );
+}
+
+// Some circles went with the file they were on. Their IDs aren't given out again.
+export function removeBoardSelections(conversation_id: string, ids: string[]) {
+  if (!ids.length) return;
+  updateConversation(conversation_id, (item) => ({
+    ...item,
+    board_selections: (item.board_selections ?? []).filter((selection) => !ids.includes(selection.id)),
+  }));
 }
