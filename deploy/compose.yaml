@@ -1,0 +1,32 @@
+# Learning Grounds on our VPS, behind the server's own nginx (docs/DEPLOY.md).
+# Both services listen on 127.0.0.1 only, so nginx is the only way in. Start it with deploy/deploy.sh,
+# which passes .env.web for the build arguments below.
+name: learning-grounds
+
+services:
+  api:
+    build: ../api
+    env_file: .env.api
+    ports:
+      - "127.0.0.1:8100:8000"
+    volumes:
+      # Canvas LMS data, kept across rebuilds.
+      - api-data:/app/data
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../web
+      # Written into the browser code at build time.
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?Set NEXT_PUBLIC_API_URL in deploy/.env.web}
+        NEXT_PUBLIC_TLDRAW_LICENSE_KEY: ${NEXT_PUBLIC_TLDRAW_LICENSE_KEY:-}
+    env_file: .env.web
+    ports:
+      - "127.0.0.1:3100:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  api-data:

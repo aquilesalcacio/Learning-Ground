@@ -1,81 +1,78 @@
 # Deploying Learning Grounds
 
-Learning Grounds runs as two Docker services on our Hostinger VPS with Easypanel. Both are built from the `main` branch on GitHub. Replace `<domain>` with our GoDaddy domain everywhere below.
+Learning Grounds runs on our Hostinger VPS (`187.77.50.15`), next to tagmephotos.com.br. It is two Docker containers built from the `main` branch, behind the server's existing nginx. Replace `<domain>` with our GoDaddy domain everywhere below.
 
-| Service | Folder | Port | Address |
+| Service | Folder | Listens on | Address |
 |---|---|---|---|
-| `web` (Next.js) | `web/` | 3000 | `https://<domain>` and `https://www.<domain>` |
-| `api` (FastAPI) | `api/` | 8000 | `https://api.<domain>` |
+| `web` (Next.js) | `web/` | `127.0.0.1:3100` | `https://<domain>` and `https://www.<domain>` |
+| `api` (FastAPI) | `api/` | `127.0.0.1:8100` | `https://api.<domain>` |
 
-Work in this order: DNS first (it takes a while to spread), then the API, then the web app, then the outside services.
+Both containers listen on the server's localhost only. nginx sends our three names to them and leaves tagmephotos.com.br's sites alone. The files are in `deploy/`: `compose.yaml`, `deploy.sh` and `nginx.conf`.
+
+Work in this order: DNS first (it takes a while to spread), then the server, then the outside services.
 
 ## 1. DNS at GoDaddy
 
-In GoDaddy, open **My Products → `<domain>` → DNS**, and set these records. The VPS IP is on the Hostinger VPS overview page.
+In GoDaddy, open **My Products → `<domain>` → DNS**, and set these records:
 
 | Type | Name | Value | Note |
 |---|---|---|---|
-| A | `@` | VPS IP | Replace GoDaddy's parked A record |
-| A | `api` | VPS IP | |
+| A | `@` | `187.77.50.15` | Replace GoDaddy's parked A record |
+| A | `api` | `187.77.50.15` | |
 | CNAME | `www` | `@` | GoDaddy usually has this already |
 
-Easypanel can only get HTTPS certificates once these resolve. Check with `dig +short <domain>` and `dig +short api.<domain>`: both should print the VPS IP.
+Turn off any domain forwarding on the domain, since it overrides these records. HTTPS certificates can only be issued once these resolve. Check with `dig +short <domain> api.<domain>`: each should print the VPS IP.
 
-## 2. The API service
+## 2. The server, once
 
-In Easypanel, create a project (`learning-grounds`), then **+ Service → App**, named `api`.
-
-- **Source:** GitHub, repository `aquilesalcacio/Learning-Ground`, branch `main`, build path `/api`.
-- **Build:** Dockerfile, file `Dockerfile`.
-- **Mounts:** add a volume mounted at `/app/data`. Canvas LMS connections are saved there, so they survive redeploys.
-- **Domains:** `api.<domain>`, HTTPS on, proxy port `8000`.
-- **Environment:**
+In a root shell on the VPS (hPanel's Browser terminal, or `ssh root@187.77.50.15`):
 
 ```bash
-ELEVENLABS_API_KEY=...
-ELEVENLABS_AGENT_ID=...       # as in api/.env
-GEMINI_API_KEY=...            # a paid key: the free tier allows 20 requests a day
-AUTH0_DOMAIN=...              # as in api/.env
-AUTH0_AUDIENCE=https://api.learning-grounds.dev
-WEB_ORIGINS=https://<domain>,https://www.<domain>
-WEB_BASE_URL=https://<domain>
-CANVAS_LMS_BASE_URL=...       # as in api/.env
-CANVAS_LMS_CLIENT_ID=...
-CANVAS_LMS_CLIENT_SECRET=...
-CANVAS_LMS_REDIRECT_URI=https://api.<domain>/canvas-lms/callback
-CANVAS_LMS_STATE_SECRET=...   # openssl rand -hex 32
-LTI_CONSUMER_KEY=learning-grounds
-LTI_SHARED_SECRET=...         # as in api/.env, or a new one pasted into Canvas LMS again
-LTI_LAUNCH_URL=https://api.<domain>/lti/launch
+docker compose version || curl -fsSL https://get.docker.com | sh   # Docker, if it isn't there yet
+certbot --version || apt-get install -y certbot python3-certbot-nginx
+git clone https://github.com/aquilesalcacio/Learning-Ground.git /opt/learning-grounds
 ```
 
-Never set `AUTH_DISABLED` on the server. Copy the values marked `...` from `api/.env`.
+## 3. The environment files
 
-Deploy, then open `https://api.<domain>/health`. It should show `{"status":"ok"}`.
-
-## 3. The web service
-
-**+ Service → App**, named `web`.
-
-- **Source:** the same repository and branch, build path `/web`.
-- **Build:** Dockerfile, file `Dockerfile`.
-- **Domains:** `<domain>` and `www.<domain>`, HTTPS on, proxy port `3000`.
-- **Environment:**
+From the laptop, send each service's settings straight to the server. The keys come from `api/.env` and `web/.env.local`, and the addresses from the domain, so nothing local (localhost URLs, `AUTH_DISABLED`) reaches the server. Each command asks for the root password.
 
 ```bash
-AUTH0_DOMAIN=...              # as in web/.env.local
-AUTH0_CLIENT_ID=...
-AUTH0_CLIENT_SECRET=...
-AUTH0_SECRET=...              # a new one for production: openssl rand -hex 32
-AUTH0_AUDIENCE=https://api.learning-grounds.dev
-APP_BASE_URL=https://<domain>
-NEXT_PUBLIC_API_URL=https://api.<domain>
-NEXT_PUBLIC_TLDRAW_LICENSE_KEY=...
+cd api
+uv run scripts/deploy_env.py api <domain> | ssh root@187.77.50.15 'umask 077; cat > /opt/learning-grounds/deploy/.env.api'
+uv run scripts/deploy_env.py web <domain> --tldraw-key <key> | ssh root@187.77.50.15 'umask 077; cat > /opt/learning-grounds/deploy/.env.web'
 ```
 
-The two `NEXT_PUBLIC_` values are written into the browser code when the image is built, so the build needs them, not only the running server. The Dockerfile reads them as build arguments. If the build stops with "Set NEXT_PUBLIC_API_URL as a build argument", the environment didn't reach the build: add both values as build arguments in the service's build settings and deploy again. Changing either one later also needs a new build.
+`.env.api` holds `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, `GEMINI_API_KEY`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `WEB_ORIGINS`, `WEB_BASE_URL` and the three `LTI_*` values. `.env.web` holds the Auth0 app's values with a new `AUTH0_SECRET`, `APP_BASE_URL` with both addresses (so Auth0 returns a student to the one they started on), `NEXT_PUBLIC_API_URL` and the tldraw key.
 
-## 4. Outside services
+The `CANVAS_LMS_*` OAuth values are only for a school's Canvas LMS instance with a Developer Key. Canvas Lite has none, so we leave them out, and the Student Profile hides its Connect button. Never set `AUTH_DISABLED` on the server.
+
+## 4. Build and start
+
+On the server:
+
+```bash
+/opt/learning-grounds/deploy/deploy.sh
+```
+
+It pulls `main`, builds both images, starts them and waits until both answer. The first build takes several minutes. The `NEXT_PUBLIC_` values are written into the browser code when the web image is built, so changing either one needs this again.
+
+## 5. nginx and HTTPS
+
+On the server, after DNS resolves:
+
+```bash
+sed 's/DOMAIN/<domain>/g' /opt/learning-grounds/deploy/nginx.conf > /etc/nginx/sites-available/learning-grounds
+ln -s /etc/nginx/sites-available/learning-grounds /etc/nginx/sites-enabled/learning-grounds
+nginx -t && systemctl reload nginx
+certbot --nginx --redirect -d <domain> -d www.<domain> -d api.<domain>
+```
+
+`nginx -t` checks the whole configuration first. If it fails, nginx keeps running with the old one, and tagmephotos.com.br isn't affected. Certbot adds the certificates and the redirect to HTTPS to our file only, and renews them with the server's other certificates. If the server keeps its sites in `/etc/nginx/conf.d/` instead, write the file to `/etc/nginx/conf.d/learning-grounds.conf` and skip the `ln` line.
+
+Then open `https://api.<domain>/health`. It should show `{"status":"ok"}`.
+
+## 6. Outside services
 
 **Auth0** (Applications → Learning Grounds → Settings):
 
@@ -87,30 +84,44 @@ The two `NEXT_PUBLIC_` values are written into the browser code when the image i
 
 Keep the localhost entries, so local development still works.
 
-**Canvas LMS** (our instance, as admin):
+**Canvas LMS** (Canvas Lite, course "Sharkbyte test"): in **Settings → Apps → View App Configurations**, delete the old Learning Grounds app, then **+ App** with:
 
-- **Admin → Developer Keys →** our API key: add `https://api.<domain>/canvas-lms/callback` to its Redirect URIs.
-- **The LTI app:** in each course that uses it, edit or re-add the app from `https://api.<domain>/lti/config.xml`, with the same consumer key and shared secret as the API's environment.
+- **Configuration Type:** By URL
+- **Name:** Learning Grounds
+- **Consumer Key:** `learning-grounds`
+- **Shared Secret:** `LTI_SHARED_SECRET` from `api/.env`
+- **Config URL:** `https://api.<domain>/lti/config.xml`
+
+On a school instance with OAuth set up, also add `https://api.<domain>/canvas-lms/callback` to the Developer Key's Redirect URIs.
 
 **tldraw:** the license key must allow `<domain>`. Without a key, the board shows tldraw's licence notice.
 
-**ElevenLabs:** once the deployed web app works, require auth on the agent, so its ID alone can't start a session and spend our minutes:
+**ElevenLabs:** require auth on the agent, so its ID alone can't start a session and spend our minutes:
 
 ```bash
 cd api && uv run scripts/elevenlabs_setup.py agent --auth
 ```
 
-From then on, every web build talking to the agent must be one that gets credentials from `POST /voice/session`: `main` from Nov 8 onward.
+From then on, every web build talking to the agent must be one that gets credentials from `POST /voice/session`: `main` from Nov 8 onward. Anyone running an older local copy needs to pull `main` first.
 
-## 5. Check the live site
+**Gemini:** turn on billing for the key's project in Google AI Studio. The free tier allows 20 requests a day.
+
+## 7. Check the live site
 
 1. Open `https://<domain>`. It sends you to log in, then back to the start screen.
 2. Upload a homework PDF. Its pages appear and are read one by one.
 3. Start a voice session and ask the tutor to circle problem 3. The pen draws as it talks.
 4. Write on the problem and ask the tutor to check your work.
 5. In a new chat, ask for a practice problem. The tutor writes a question with an answer box; answer in it and wait.
-6. On the Student Profile, connect Canvas LMS, then open an assignment from Canvas LMS.
+6. In Canvas Lite, open Learning Grounds from the course menu. It opens in a new tab, and the Student Profile shows the course.
 
 ## Redeploying
 
-Push to `main`, then press **Deploy** on the service in Easypanel, or turn on its auto-deploy. Run `uv run scripts/elevenlabs_setup.py agent --auth` from `api/` again after changing `api/voice/tools.json`, and deploy the web app at the same time.
+Push to `main`, then run `ssh root@187.77.50.15 /opt/learning-grounds/deploy/deploy.sh`. Run `uv run scripts/elevenlabs_setup.py agent --auth` from `api/` again after changing `api/voice/tools.json`, and redeploy at the same time.
+
+## When something goes wrong
+
+- **Container logs:** `docker compose -f /opt/learning-grounds/deploy/compose.yaml logs --tail 100 web` (or `api`).
+- **The web build is killed (exit code 137):** the server ran out of memory. Add swap once, then deploy again: `fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab`.
+- **502 Bad Gateway:** the container for that address isn't running. Check the logs, then run `deploy.sh` again.
+- **Take Learning Grounds offline** without touching anything else: `rm /etc/nginx/sites-enabled/learning-grounds && nginx -t && systemctl reload nginx`, then `docker compose -f /opt/learning-grounds/deploy/compose.yaml down`.
