@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { applyLgAction, askLgQuestion, type LgAction } from "@/lib/lg-actions";
 import { parseNumber, parseNumberLineMarks } from "@/lib/lg-ink";
+import { runStudentProgress } from "@/lib/lg-progress-run";
 import { getActiveDocument, getBoardQuestions, useLgState } from "@/lib/lg-store";
 
 // Asks a question on the board, as the tutor's ask_question tool does, beside a region or on a
@@ -44,6 +45,29 @@ function AskForm({ regionId, regionLabel }: { regionId: string; regionLabel: str
         {outcome && <span className="text-xs text-muted-foreground">{outcome}</span>}
       </div>
     </form>
+  );
+}
+
+// Runs get_student_progress as the tutor would, pen and all, and shows the report it would get.
+function ProgressButton() {
+  const [report, setReport] = useState("");
+  const [running, setRunning] = useState(false);
+  async function lookUp() {
+    setRunning(true);
+    setReport(await runStudentProgress());
+    setRunning(false);
+  }
+  return (
+    <div className="grid gap-1.5">
+      <div>
+        <Button type="button" variant="outline" size="sm" disabled={running} onClick={lookUp}>
+          {running ? "Looking up progress..." : "Look up progress"}
+        </Button>
+      </div>
+      {report && (
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-2 text-xs">{report}</pre>
+      )}
+    </div>
   );
 }
 
@@ -102,6 +126,7 @@ export function TutorActions() {
             Upload homework, or ask a question on the board, to test the tutor&apos;s marks.
           </p>
           <AskForm regionId="" regionLabel="" />
+          <ProgressButton />
         </div>
       ) : (
         <div className="grid gap-3 pt-1">
@@ -176,6 +201,7 @@ export function TutorActions() {
           </form>
 
           <AskForm regionId={regionId} regionLabel={region.label} />
+          <ProgressButton />
 
           <form className="grid gap-1.5" onSubmit={writeNumberLine}>
             <Label htmlFor="action-range" className="text-xs">

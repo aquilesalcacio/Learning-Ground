@@ -19,6 +19,7 @@ import { DEFAULT_TUTOR_ID, migrateLgState, PRESET_TUTORS, PRESETS_VERSION } from
 const STORAGE_KEY = "lg-state-v1";
 
 const TITLE_MAX = 48;
+const PRACTICE_HISTORY_MAX = 10;
 
 export type LgState = {
   tutors: Tutor[];
@@ -331,7 +332,8 @@ export function findBoardQuestion(state: LgState, id: string): LgBoardQuestion |
   return getBoardQuestions(state).find((question) => question.id === id);
 }
 
-// Adds a question under the next free ID (q1, q2, ...) and returns it.
+// Adds a question under the next free ID (q1, q2, ...) and returns it. Its text also goes in the
+// chat's practice history, which clear leaves alone.
 export function addBoardQuestion(conversation_id: string, make: (id: string) => LgBoardQuestion): LgBoardQuestion | null {
   const conversation = readLgState().conversations.find((item) => item.id === conversation_id);
   if (!conversation) return null;
@@ -341,6 +343,7 @@ export function addBoardQuestion(conversation_id: string, make: (id: string) => 
     ...item,
     board_question_count: count,
     board_questions: [...(item.board_questions ?? []), question].slice(-20),
+    practice_history: [...(item.practice_history ?? []), question.text].slice(-PRACTICE_HISTORY_MAX),
   }));
   return question;
 }

@@ -14,6 +14,7 @@ import { LgApiAuthError, lgApiFetch } from "./lg-api";
 import { checkStudentWork, type WorkCheck, type WorkCheckOutcome, workReport } from "./lg-check-work";
 import { apiErrorMessage } from "./lg-document";
 import { parseNumber, parseNumberLineMarks } from "./lg-ink";
+import { runStudentProgress } from "./lg-progress-run";
 import { getActiveConversation, getActiveDocument, getBoardQuestions, readLgState } from "./lg-store";
 import { penInterrupted, setPenVoice } from "./lg-tutor-pen";
 import { buildTutorPrompt, type LgHomeworkContext, resolveLanguage, toneVoiceSettings } from "./lg-tutor-prompt";
@@ -82,7 +83,7 @@ const clientTools: ClientTools = {
     if (!outcome.ok) return outcome.message;
     return [
       `Question ${outcome.id} is being written on the board, with an answer box under it.`,
-      "Stop and wait for the student to answer. Don't give the answer.",
+      `Set it up on ${outcome.id} with one board tool in this same reply, then stop and let the student answer. Don't give the answer.`,
       `To check their answer, call read_student_work with region_id ${outcome.id}. You can also mark it with your other tools using ${outcome.id}.`,
     ].join(" ");
   },
@@ -92,6 +93,13 @@ const clientTools: ClientTools = {
     const outcome = await checkWithPen(text(p.region_id));
     console.log(`[lg-voice] ${new Date().toISOString()} read_student_work done`, outcome.ok);
     return outcome.ok ? workReport(outcome) : outcome.message;
+  },
+  // Blocking too: Canvas LMS gets about 4 s, then the saved profile is used.
+  get_student_progress: async () => {
+    console.log(`[lg-voice] ${new Date().toISOString()} tool get_student_progress`);
+    const report = await runStudentProgress();
+    console.log(`[lg-voice] ${new Date().toISOString()} get_student_progress done`);
+    return report;
   },
 };
 

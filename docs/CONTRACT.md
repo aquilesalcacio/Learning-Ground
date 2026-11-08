@@ -89,8 +89,19 @@ The tutor never drops a finished shape on the board. `applyLgAction` turns each 
 | `write_math` | `near_region_id`, `latex` | KaTeX in the tutor's colour, revealed left to right (`web/components/lg-math-shape.tsx`) |
 | `number_line` | `near_region_id`, `min`, `max`, `marks?` | The axis and ticks drawn left to right, then the numbers, then a dot for each mark |
 | `clear` | none | The tutor's marks and questions fade out. The student's work stays |
+| `get_student_progress` | none | The pen thinks in the middle of the view while the tutor looks up the student's Canvas LMS info. It returns a report to the tutor and leaves no mark |
 
 Every ID above can also be the ID of a question the tutor wrote (below).
+
+### What to practice
+
+`get_student_progress` runs `runStudentProgress()` in `web/lib/lg-progress-run.ts`. The tutor calls it when the student asks what to work on, asks for practice, or asks for help without naming a problem while no homework is open. It then writes a practice problem with `ask_question` and sets it up on the board in the same reply.
+
+1. The pen thinks in the middle of the view until the report is ready (`lookAtLgBoard` in `lg-actions.ts`).
+2. Fresh Canvas LMS data gets about 4 seconds: the calendar feed is refreshed (`GET /canvas-lms/calendar-feed`, a 409 when none is saved), then the OAuth import is tried (`GET /canvas-lms/profile`, through `fetchCanvasLmsProfile`, which only adds courses and refreshes Coming up, and leaves name and school alone). Both fail quietly, and then the saved profile is used.
+3. The report (`progressReport` in `lg-tutor-prompt.ts`) holds the courses, upcoming work, the chat's Canvas LMS assignment, "Finds hard", checks across all chats that found a mistake or an unfinished answer, and recent practice questions from every chat, newest first with this chat's first, so the tutor doesn't repeat one. The pure parts (`wrongChecks`, `recentPractice`) are in `lg-progress.ts`. It names its source and says that grades aren't available.
+
+Each Check my work result is saved with the problem's text (`topic`, up to 120 characters) and the time (`at`). Each chat keeps its last 10 question texts in `practice_history`, which `clear` doesn't empty.
 
 **`lg-math` shapes:** `write_math` adds a custom tldraw shape. Boards saved with one won't load without its util, so keep `LgMathShapeUtil` in `shapeUtils` on `<Tldraw>`.
 
@@ -105,7 +116,7 @@ Every ID above can also be the ID of a question the tutor wrote (below).
 
 ### Changing the tools
 
-`api/voice/tools.json`, `clientTools` in `lg-voice.tsx` and the `LgAction` union must name the same tools with the same parameters. After changing them, run `uv run scripts/elevenlabs_setup.py agent` from `api/` to update the live agent. Ship the web change and the agent change together, because a web build that doesn't know a tool fails when the tutor calls it.
+`api/voice/tools.json`, `clientTools` in `lg-voice.tsx` and the `LgAction` union must name the same tools with the same parameters. Tools that return a result to the tutor (`ask_question`, `read_student_work` and `get_student_progress`) aren't board actions, so they're in `tools.json` and `clientTools` only. After changing them, run `uv run scripts/elevenlabs_setup.py agent` from `api/` to update the live agent. Ship the web change and the agent change together, because a web build that doesn't know a tool fails when the tutor calls it.
 
 The debug panel (`components/tutor-actions.tsx`, in the sidebar in development) has a button for every tool, so each one can be tested without voice.
 

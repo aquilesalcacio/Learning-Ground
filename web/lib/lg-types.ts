@@ -121,7 +121,9 @@ export type CanvasLmsAssignment = {
 };
 
 export type WorkCheckStatus = "correct" | "incomplete" | "error" | "blank" | "unreadable";
-export type WorkCheckRecord = { label: string; status: WorkCheckStatus };
+// topic is the problem's text and at is when it was checked, so get_student_progress can name
+// weak spots. Records saved before them have neither.
+export type WorkCheckRecord = { label: string; status: WorkCheckStatus; topic?: string; at?: number };
 
 export type CanvasLmsCourse = { name: string; code: string; sections: string[]; start_at: string; end_at: string };
 
@@ -151,6 +153,9 @@ export type Conversation = {
   // question's ID is never reused for another one, even after the tutor clears the board.
   board_questions?: LgBoardQuestion[];
   board_question_count?: number;
+  // The last few questions the tutor wrote here. Unlike board_questions, clear never empties it,
+  // so get_student_progress can tell the tutor not to repeat a practice problem.
+  practice_history?: string[];
 };
 
 export type Option<T extends string> = { value: T; label: string };

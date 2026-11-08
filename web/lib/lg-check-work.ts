@@ -19,6 +19,8 @@ export type WorkCheckOutcome =
 
 // A question the tutor wrote on the board is checked by its own text, within the API's 80 characters.
 const LABEL_MAX = 80;
+// What the problem says, kept with the check so get_student_progress can name the weak spot.
+const TOPIC_MAX = 120;
 
 function questionLabel(id: string, text: string) {
   const label = `Question ${id.replace(/^q/, "")}: ${text}`;
@@ -52,7 +54,8 @@ export async function checkStudentWork(region_id: string): Promise<WorkCheckOutc
     const response = await lgApiFetch("/check-work", { method: "POST", body: form });
     if (!response.ok) return { ok: false, message: await apiErrorMessage(response, "Check my work failed. Please try again.") };
     const check = (await response.json()) as WorkCheck;
-    recordWorkCheck({ label, status: check.status });
+    const topic = (question?.text ?? region?.text ?? "").replace(/\s+/g, " ").trim().slice(0, TOPIC_MAX);
+    recordWorkCheck({ label, status: check.status, ...(topic ? { topic } : {}), at: Date.now() });
     return { ok: true, region_id: checked_id, label, check };
   } catch (error) {
     if (error instanceof LgApiAuthError) return { ok: false, message: error.message };

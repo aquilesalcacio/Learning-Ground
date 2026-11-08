@@ -790,6 +790,14 @@ export function lookAtLgWork(region_id: string) {
   penLook(work ? { x: work.x + Math.min(work.w * 0.4, 160), y: work.y + Math.min(work.h * 0.5, 90) } : null);
 }
 
+// While the tutor looks something up that isn't on the board, such as the student's progress, its
+// pen thinks in the middle of the view. End it with doneLookingAtLgWork, always: until then the
+// thinking step holds up every mark queued after it.
+export function lookAtLgBoard() {
+  const view = lgEditor?.getViewportPageBounds();
+  penLook(view ? { x: view.x + view.w / 2, y: view.y + view.h / 2 } : null);
+}
+
 // The pen stops looking; it celebrates when the work was right.
 export function doneLookingAtLgWork(correct: boolean) {
   penDoneLooking(correct);

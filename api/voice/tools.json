@@ -139,7 +139,7 @@
     "tool_config": {
       "type": "client",
       "name": "write_text",
-      "description": "Write a short hint in your handwriting beside a problem. Hints only, never a final answer.",
+      "description": "Write a few words in your handwriting beside a problem or question: hints and steps; a full worked solution only for your own practice problem when the student asks. Never a homework's final answer.",
       "expects_response": false,
       "parameters": {
         "type": "object",
@@ -150,7 +150,7 @@
           },
           "text": {
             "type": "string",
-            "description": "The hint, a few words in the session's language."
+            "description": "The hint or step, a few words in the session's language."
           }
         },
         "required": [
@@ -165,7 +165,7 @@
     "tool_config": {
       "type": "client",
       "name": "write_math",
-      "description": "Write a short equation beside a problem, as a hint step. Never a final answer.",
+      "description": "Write a short equation beside a problem or question: hints and steps; a full worked solution only for your own practice problem when the student asks. Never a homework's final answer.",
       "expects_response": false,
       "parameters": {
         "type": "object",
@@ -226,7 +226,7 @@
     "tool_config": {
       "type": "client",
       "name": "ask_question",
-      "description": "Write a question or a practice problem on the board for the student to answer, with a box under it to answer in. Works with or without homework. It returns the question's ID, such as q1, for your other tools and read_student_work. After calling it, stop and let the student answer.",
+      "description": "Write a question or a practice problem on the board for the student to answer, with a box under it to answer in. Works with or without homework. It returns the question's ID, such as q1, for your other tools and read_student_work. Set it up on that ID with one board tool in this same reply, then stop and let the student answer.",
       "expects_response": true,
       "response_timeout_secs": 5,
       "parameters": {
@@ -267,6 +267,16 @@
           "region_id"
         ]
       }
+    }
+  },
+  {
+    "enabled": true,
+    "tool_config": {
+      "type": "client",
+      "name": "get_student_progress",
+      "description": "Look up what the student is working on and finding hard: their Canvas LMS courses and upcoming assignments, the assignment this chat is for, and what they got wrong in recent checks. Call it when they ask what to work on, ask for practice, or ask for help without naming a problem while no homework is open. Say you're taking a look first.",
+      "expects_response": true,
+      "response_timeout_secs": 10
     }
   },
   {
