@@ -29,7 +29,7 @@ function subscribeReducedMotion(listener: () => void) {
   return () => query.removeEventListener("change", listener);
 }
 
-function useReducedMotion() {
+export function useReducedMotion() {
   return useSyncExternalStore(
     subscribeReducedMotion,
     () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,

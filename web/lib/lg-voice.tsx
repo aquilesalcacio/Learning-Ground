@@ -9,9 +9,11 @@ import {
   useConversationStatus,
 } from "@elevenlabs/react";
 import { type ReactNode, useCallback, useRef, useState } from "react";
-import { applyLgAction, type LgAction } from "./lg-actions";
-import { checkStudentWork, type WorkCheck, workReport } from "./lg-check-work";
-import { getActiveConversation, getActiveDocument, readLgState } from "./lg-store";
+import { applyLgAction, askLgQuestion, doneLookingAtLgWork, type LgAction, lookAtLgWork } from "./lg-actions";
+import { checkStudentWork, type WorkCheck, type WorkCheckOutcome, workReport } from "./lg-check-work";
+import { parseNumber, parseNumberLineMarks } from "./lg-ink";
+import { getActiveConversation, getActiveDocument, getBoardQuestions, readLgState } from "./lg-store";
+import { penInterrupted, setPenVoice } from "./lg-tutor-pen";
 import { buildTutorPrompt, type LgHomeworkContext, resolveLanguage, toneVoiceSettings } from "./lg-tutor-prompt";
 import { findVoice } from "./lg-voices";
 import type { ChatSpeaker, LgDocument, Tutor } from "./lg-types";
@@ -40,10 +42,22 @@ function act(name: string, parameters: Record<string, unknown>, action: LgAction
 
 const text = (value: unknown) => String(value ?? "");
 
+// Check my work, with the tutor's pen hovering over the work while Gemini reads it, and
+// celebrating when it's right.
+async function checkWithPen(region_id: string): Promise<WorkCheckOutcome> {
+  lookAtLgWork(region_id);
+  const outcome = await checkStudentWork(region_id);
+  doneLookingAtLgWork(outcome.ok && outcome.check.status === "correct");
+  return outcome;
+}
+
 // Names and parameters must match api/voice/tools.json exactly.
 const clientTools: ClientTools = {
   focus_region: (p) => act("focus_region", p, { type: "focus_region", region_id: text(p.region_id) }),
+  point_at: (p) => act("point_at", p, { type: "point_at", region_id: text(p.region_id) }),
   circle_region: (p) => act("circle_region", p, { type: "circle_region", region_id: text(p.region_id) }),
+  underline_region: (p) => act("underline_region", p, { type: "underline_region", region_id: text(p.region_id) }),
+  highlight_region: (p) => act("highlight_region", p, { type: "highlight_region", region_id: text(p.region_id) }),
   draw_arrow: (p) =>
     act("draw_arrow", p, {
       type: "draw_arrow",
@@ -53,15 +67,43 @@ const clientTools: ClientTools = {
     }),
   write_text: (p) => act("write_text", p, { type: "write_text", near_region_id: text(p.near_region_id), text: text(p.text) }),
   write_math: (p) => act("write_math", p, { type: "write_math", near_region_id: text(p.near_region_id), latex: text(p.latex) }),
+  number_line: (p) =>
+    act("number_line", p, {
+      type: "number_line",
+      near_region_id: text(p.near_region_id),
+      min: parseNumber(text(p.min)),
+      max: parseNumber(text(p.max)),
+      marks: parseNumberLineMarks(p.marks ? text(p.marks) : ""),
+    }),
   clear: (p) => act("clear", p, { type: "clear" }),
-  // The only blocking tool: the tutor waits for this answer before it replies.
+  // Answers at once with the question's ID, which the tutor needs to check the answer later.
+  ask_question: (p) => {
+    console.log(`[lg-voice] ${new Date().toISOString()} tool ask_question`, p);
+    const outcome = askLgQuestion(text(p.question), p.near_region_id ? text(p.near_region_id) : "");
+    if (!outcome.ok) return outcome.message;
+    return [
+      `Question ${outcome.id} is being written on the board, with an answer box under it.`,
+      "Stop and wait for the student to answer. Don't give the answer.",
+      `To check their answer, call read_student_work with region_id ${outcome.id}. You can also mark it with your other tools using ${outcome.id}.`,
+    ].join(" ");
+  },
+  // Blocking: the tutor waits for this answer before it replies.
   read_student_work: async (p) => {
     console.log(`[lg-voice] ${new Date().toISOString()} tool read_student_work`, p);
-    const outcome = await checkStudentWork(text(p.region_id));
+    const outcome = await checkWithPen(text(p.region_id));
     console.log(`[lg-voice] ${new Date().toISOString()} read_student_work done`, outcome.ok);
     return outcome.ok ? workReport(outcome) : outcome.message;
   },
 };
+
+// What the student sees of a reply while it streams in: no audio tags such as [laughs], and no
+// half-written tag at the end. Tags are words only, so math such as [0, 1] stays.
+function visibleText(line: string) {
+  return line
+    .replace(/\[[a-zA-Z\u00C0-\u024F][a-zA-Z\u00C0-\u024F ]{0,28}\]\s?/g, "")
+    .replace(/\[[a-zA-Z\u00C0-\u024F ]*$/, "")
+    .trimStart();
+}
 
 // A chat's homework, as the tutor prompt sees it: the regions read from its pages, with the
 // text Gemini read. A page with no problems found is one p{n}.page region holding the page's text.
@@ -82,6 +124,7 @@ function sessionOptions({ tutor, textOnly }: SessionRequest) {
     state.profile,
     homeworkContext(getActiveDocument(state)),
     getActiveConversation(state)?.canvas_lms_assignment ?? null,
+    getBoardQuestions(state).map(({ id, text: question }) => ({ id, text: question })),
   );
   return {
     agentId: AGENT_ID,
@@ -124,6 +167,8 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
   const [checking, setChecking] = useState(false);
   const [textOnly, setTextOnly] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  // A text-only reply as it streams in, before onMessage records it.
+  const [streamingLine, setStreamingLine] = useState("");
   const restart = useRef<SessionRequest | null>(null);
   const pendingText = useRef<string[]>([]);
   // Contextual updates that arrived while a session was connecting. Its prompt was already built.
@@ -131,11 +176,22 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
 
   const conversation = useConversation({
     onMessage: ({ message, role }) => {
+      if (role !== "user") setStreamingLine("");
       // After each turn timeout of silence, ElevenLabs logs a student turn of "...". It isn't speech.
       if (!message.trim() || (role === "user" && SILENT_TURN.test(message))) return;
       onLine(role === "user" ? "student" : "tutor", message);
     },
+    // In a text chat, the reply appears word by word while the tutor's pen draws. A voice call
+    // keeps whole lines, so the transcript never runs ahead of the voice.
+    onAgentChatResponsePart: ({ text: part, type }) => {
+      if (!textOnly) return;
+      if (type === "start") setStreamingLine("");
+      else if (type === "delta") setStreamingLine((line) => line + part);
+    },
+    // The pen waits for the tutor's voice, and speeds up when the student talks over it.
+    onInterruption: () => penInterrupted(),
     onConnect: () => {
+      setPenVoice({ live: true, speaking: false, level: () => conversation.getOutputVolume() });
       for (const message of pendingContext.current) conversation.sendContextualUpdate(message);
       pendingContext.current = [];
       for (const message of pendingText.current) conversation.sendUserMessage(message);
@@ -143,12 +199,18 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
     },
     onError: (message) => {
       console.error("[lg-voice]", message);
+      setStreamingLine("");
       pendingText.current = [];
       pendingContext.current = [];
       setError(message);
     },
-    onModeChange: ({ mode }) => console.log(`[lg-voice] ${new Date().toISOString()} mode ${mode}`),
+    onModeChange: ({ mode }) => {
+      console.log(`[lg-voice] ${new Date().toISOString()} mode ${mode}`);
+      setPenVoice({ speaking: mode === "speaking" });
+    },
     onDisconnect: () => {
+      setPenVoice({ live: false, speaking: false });
+      setStreamingLine("");
       const next = restart.current;
       restart.current = null;
       setRestarting(false);
@@ -182,6 +244,7 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
     }
     setError("");
     setTextOnly(nextTextOnly);
+    setPenVoice({ textOnly: nextTextOnly });
     onLine("system", `Session started with ${tutor.name || "Unnamed tutor"}.`);
     conversation.startSession(sessionOptions({ tutor, textOnly: nextTextOnly }));
     return true;
@@ -191,7 +254,7 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
   async function checkWork(region_id: string) {
     if (checking) return;
     setChecking(true);
-    const outcome = await checkStudentWork(region_id);
+    const outcome = await checkWithPen(region_id);
     setChecking(false);
     if (!outcome.ok) {
       onLine("system", outcome.message);
@@ -210,6 +273,7 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
   function restartSession(tutor: Tutor, nextTextOnly: boolean) {
     setError("");
     setTextOnly(nextTextOnly);
+    setPenVoice({ textOnly: nextTextOnly });
     setRestarting(true);
     restart.current = { tutor, textOnly: nextTextOnly };
     endSession();
@@ -250,6 +314,7 @@ export function useLgVoice({ onLine }: { onLine: (who: ChatSpeaker, text: string
     status,
     connected,
     textOnly,
+    streamingLine: visibleText(streamingLine),
     error,
     checking,
     checkWork,

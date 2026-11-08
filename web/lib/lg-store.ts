@@ -7,6 +7,7 @@ import type {
   ChatMessage,
   ChatSpeaker,
   Conversation,
+  LgBoardQuestion,
   LgDocument,
   StudentProfile,
   Tutor,
@@ -320,4 +321,39 @@ export function recordWorkCheck(check: WorkCheckRecord) {
   const conversation = getActiveConversation(readLgState());
   if (!conversation) return;
   updateConversation(conversation.id, (item) => ({ ...item, work_checks: [...(item.work_checks ?? []), check].slice(-30) }));
+}
+
+// Questions the tutor wrote on the open chat's board (lg-actions.ts writes them).
+export function getBoardQuestions(state: LgState): LgBoardQuestion[] {
+  return getActiveConversation(state)?.board_questions ?? [];
+}
+
+export function findBoardQuestion(state: LgState, id: string): LgBoardQuestion | undefined {
+  return getBoardQuestions(state).find((question) => question.id === id);
+}
+
+// Adds a question under the next free ID (q1, q2, ...) and returns it.
+export function addBoardQuestion(conversation_id: string, make: (id: string) => LgBoardQuestion): LgBoardQuestion | null {
+  const conversation = readLgState().conversations.find((item) => item.id === conversation_id);
+  if (!conversation) return null;
+  const count = (conversation.board_question_count ?? 0) + 1;
+  const question = make(`q${count}`);
+  updateConversation(conversation_id, (item) => ({
+    ...item,
+    board_question_count: count,
+    board_questions: [...(item.board_questions ?? []), question].slice(-20),
+  }));
+  return question;
+}
+
+export function updateBoardQuestion(conversation_id: string, id: string, patch: Partial<Omit<LgBoardQuestion, "id">>) {
+  updateConversation(conversation_id, (item) => ({
+    ...item,
+    board_questions: (item.board_questions ?? []).map((question) => (question.id === id ? { ...question, ...patch } : question)),
+  }));
+}
+
+// The tutor cleared its marks, so its questions are gone from the board too.
+export function clearBoardQuestions(conversation_id: string) {
+  updateConversation(conversation_id, (item) => (item.board_questions?.length ? { ...item, board_questions: [] } : item));
 }

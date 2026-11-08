@@ -8,7 +8,7 @@ import { pulseTutorOrb } from "@/components/tutor-orb";
 import { TutorStage } from "@/components/tutor-stage";
 import { UploadDialog } from "@/components/upload-dialog";
 import { Button } from "@/components/ui/button";
-import { onLgHomeworkRead } from "@/lib/lg-actions";
+import { onLgAnswerWritten, onLgHomeworkRead } from "@/lib/lg-actions";
 import {
   appendMessage,
   getActiveConversation,
@@ -51,7 +51,16 @@ function Dock({ state, boardId }: { state: LgState; boardId: string }) {
   });
   useEffect(() => onLgHomeworkRead((conversation_id) => tellTutorAboutHomework(conversation_id)), []);
 
+  // The student wrote in the answer box of a question the tutor wrote, then paused: the tutor
+  // checks it without being asked. With no session, nothing happens.
+  const tellTutorAboutAnswer = useEffectEvent((question_id: string) => {
+    if (!voice.connected) return;
+    voice.sendWhenReady(`[Answer written] The student wrote an answer in the box for ${question_id}.`);
+  });
+  useEffect(() => onLgAnswerWritten((question_id) => tellTutorAboutAnswer(question_id)), []);
+
   const messages = conversation?.messages ?? [];
+  const streaming = voice.streamingLine;
   const active = status !== "idle";
   const connecting = status === "connecting";
   const onVoiceCall = active && !voice.textOnly;
@@ -59,7 +68,7 @@ function Dock({ state, boardId }: { state: LgState; boardId: string }) {
   useEffect(() => {
     const element = transcript.current;
     if (element) element.scrollTop = element.scrollHeight;
-  }, [messages.length, transcriptOpen]);
+  }, [messages.length, transcriptOpen, streaming.length]);
 
   // Opening another chat, starting a new one or deleting this one all leave the session behind.
   const activeConversationId = state.active_conversation_id;
@@ -147,6 +156,16 @@ function Dock({ state, boardId }: { state: LgState; boardId: string }) {
                     {message.text}
                   </p>
                 ),
+              )}
+              {/* A text reply arrives word by word while the tutor draws. */}
+              {streaming && (
+                <p aria-live="off">
+                  <span className="font-medium">{tutor.name || "Tutor"}: </span>
+                  {streaming}
+                  <span aria-hidden="true" className="ml-0.5 inline-block animate-pulse">
+                    ▍
+                  </span>
+                </p>
               )}
             </div>
           ) : (

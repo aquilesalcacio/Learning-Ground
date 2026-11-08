@@ -34,6 +34,7 @@ Never commit these files. Without the agent ID, the panel shows an error when yo
    | `restartSession(tutor, textOnly)`, `switchTutor(tutor, textOnly)` | Replace the live session, such as to switch from text to voice or to another tutor |
    | `sendWhenReady(message)` | Send a typed message now, or when the connecting session opens. Typed messages aren't reported to `onLine`, so add them to the chat yourself |
    | `sendContextualUpdate(message)` | Background information the tutor uses but doesn't reply to. A connecting session gets it once it opens. Returns false and drops it when no session is live or connecting |
+   | `streamingLine` | In a text chat, the tutor's reply as it streams in, word by word, with audio tags removed. `""` once `onLine` records the finished line, and always `""` in a voice call |
    | `muted`, `setMuted(value)` | Microphone mute |
    | `checkWork(region_id)`, `checking` | Check my work and its loading state. The UI has no button for it: students ask the tutor by voice or chat, and the tutor calls `read_student_work` |
 
@@ -46,7 +47,7 @@ Never commit these files. Without the agent ID, the panel shows an error when yo
 
    Each session builds its prompt when it starts, with `buildTutorPrompt` in `web/lib/lg-tutor-prompt.ts`, from the tutor, the Student Profile and the open chat's homework (`homeworkContext(document)` in `lg-voice.tsx`, which is null with no homework). When pages finish reading during a live session, `chat-dock.tsx` sends the region list with `sendContextualUpdate(homeworkContextualUpdate(...))`, using `onLgHomeworkRead` from `lg-actions.ts`.
 
-3. **Keep `applyLgAction(action)` in `web/lib/lg-actions.ts`.** Voice tools call it. Keep the action names and parameters, because they match `api/voice/tools.json` and the live ElevenLabs agent.
+3. **Keep `applyLgAction(action)` in `web/lib/lg-actions.ts`.** Voice tools call it. Keep the action names and parameters, because they match `api/voice/tools.json` and the live ElevenLabs agent. See "The tutor's pen" below for how marks are drawn.
 4. **Tag tutor shapes with `meta.author = "tutor"`.** `clear` and Check my work rely on this to tell them apart from the student's work.
 5. **Tag fixed board shapes with `meta.kind`,** such as `"page"` or `"region"`. Region shapes also need `meta.region_id`. Check my work uses these to find the student's marks and the page under them. Page images are locked image shapes with `meta.kind = "page"` and `meta.page`, created with `history: "ignore"` so undo can't remove them, and kept below everything else.
 6. **Keep the five `lg-board-link.ts` lines in `lg-actions.ts`.** They're the only back-end code in that file. If you rewrite it, add them back:
@@ -64,6 +65,49 @@ Never commit these files. Without the agent ID, the panel shows an error when yo
    ```
 
 7. **Keep region IDs such as `p1.q3`,** and keep box conversion in `web/lib/lg-regions.ts`. Tutors target region IDs, never coordinates. The app builds the IDs (`p{page}.q{k}`, in reading order on each page), never Gemini, and a page with no problems found, or not read yet, is one region `p{page}.page`. The regions live in the chat's document (below), and `lg-regions.ts` is the only module that turns `box_2d` into board positions.
+
+## The tutor's pen
+
+The tutor never drops a finished shape on the board. `applyLgAction` turns each action into steps for the tutor's pen (`web/lib/lg-tutor-pen.ts`), and the pen draws them by hand, one at a time, while the tutor talks. A cursor in the tutor's colours shows where the pen is (`web/components/tutor-cursor.tsx`, mounted as tldraw's `InFrontOfTheCanvas`).
+
+- **Geometry** is in `web/lib/lg-ink.ts`: hand-drawn loops, underlines, highlighter passes, arrow arcs, number lines and the answer box. It has no tldraw imports, so `node --test lib/lg-ink.test.ts` runs it.
+- **Timing:** in a voice call, a mark waits up to 700 ms for the tutor to start speaking, so ink and voice begin together. When the student interrupts, the rest of the queue plays three times faster. A text chat never waits.
+- **The student comes first:** while the student's pen is down (any tool but select and hand), the tutor's pen waits.
+- **Undo:** tutor marks are made outside tldraw's undo history, so the student's undo only ever removes their own work. Before this change, undo could remove a tutor mark.
+- **Finishing at once:** switching chats, hiding the tab or reduced motion finishes every queued mark immediately, so a board is never saved with half a mark.
+- **Region outlines** are still created as locked shapes (point 5), but they're always invisible. The tutor aims at regions; the student never sees the boxes.
+
+| Action | Parameters | What the student sees |
+|---|---|---|
+| `focus_region` | `region_id` | The board glides there and the pen flies along |
+| `point_at` | `region_id` | The pen taps with a ripple, leaving no ink |
+| `circle_region` | `region_id` | A hand-drawn loop |
+| `underline_region` | `region_id` | A slightly bowed underline |
+| `highlight_region` | `region_id` | A highlighter swipe, back and forth down a tall problem |
+| `draw_arrow` | `from_region_id`, `to_region_id`, `label?` | The arrow grows along its curve, then its label is written |
+| `write_text` | `near_region_id`, `text` | Handwriting in the margin, letter by letter |
+| `write_math` | `near_region_id`, `latex` | KaTeX in the tutor's colour, revealed left to right (`web/components/lg-math-shape.tsx`) |
+| `number_line` | `near_region_id`, `min`, `max`, `marks?` | The axis and ticks drawn left to right, then the numbers, then a dot for each mark |
+| `clear` | none | The tutor's marks and questions fade out. The student's work stays |
+
+Every ID above can also be the ID of a question the tutor wrote (below).
+
+**`lg-math` shapes:** `write_math` adds a custom tldraw shape. Boards saved with one won't load without its util, so keep `LgMathShapeUtil` in `shapeUtils` on `<Tldraw>`.
+
+### Questions on the board
+
+`askLgQuestion(question, near_region_id?)` in `lg-actions.ts` writes a question for the student: a note in the tutor's colour, then "Your answer" in the session's language and a dashed box to answer in. With `near_region_id`, it goes in that region's margin. Without one, or with no homework open, it goes on a free spot of the board. That's how the tutor teaches on a blank board.
+
+- It returns the question's ID at once (`q1`, `q2` and so on, never reused within a chat). The voice tool `ask_question` hands the ID to the tutor.
+- Questions are saved with the chat as `board_questions`, so `read_student_work("q1")` and the other tools still find them after a reload. `clear` removes them.
+- `captureLgRegion("q1")` captures the question's note and what the student wrote in or near its answer box.
+- When the student writes in an answer box and stops for 4 seconds, `onLgAnswerWritten` fires. `chat-dock.tsx` then sends `[Answer written] ... q1` during a live session, and the tutor checks the answer without being asked.
+
+### Changing the tools
+
+`api/voice/tools.json`, `clientTools` in `lg-voice.tsx` and the `LgAction` union must name the same tools with the same parameters. After changing them, run `uv run scripts/elevenlabs_setup.py agent` from `api/` to update the live agent. Ship the web change and the agent change together, because a web build that doesn't know a tool fails when the tutor calls it.
+
+The debug panel (`components/tutor-actions.tsx`, in the sidebar in development) has a button for every tool, so each one can be tested without voice.
 
 ## Homework
 
@@ -140,4 +184,4 @@ node --test lib/*.test.ts
 cd ../api && uv run pytest
 ```
 
-Then upload a PDF, start a text-only session, ask the tutor to circle problem 3, and click Check my work.
+Then upload a PDF, start a text-only session, ask the tutor to circle problem 3, and ask it to check your work. In a new chat with no homework, ask the tutor for a practice problem: it should write a question with an answer box, and check what you write there.

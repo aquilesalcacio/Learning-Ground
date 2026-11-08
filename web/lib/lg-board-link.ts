@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from "react";
 import { Box, type Editor, type TLShape } from "tldraw";
 import { findRegion, regionFocusBounds, regionWorkBounds, type LgBounds } from "./lg-regions";
-import { getActiveDocument, readLgState, subscribeLgState } from "./lg-store";
+import { findBoardQuestion, getActiveDocument, readLgState, subscribeLgState } from "./lg-store";
 
 // What the back end needs from the board, kept apart from lg-actions.ts so UI work there stays simple.
 // lg-actions.ts calls linkLgBoard when a board opens and noteLgActionTarget for each action.
@@ -82,19 +82,32 @@ const PIXEL_RATIOS = [2, 1.5, 1];
 const isStudentMark = (shape: TLShape) => !shape.meta.kind && shape.meta.author !== "tutor";
 
 // A picture of the student's work on a region: their marks and the homework page under them,
-// cropped to the region's working area, without the tutor's marks. With no homework open, it's
-// all of the student's marks on the board, and region_id is ignored.
+// cropped to the region's working area, without the tutor's marks. For a question the tutor wrote
+// on the board (q1), it's the question's note and what the student wrote in or by its answer box.
+// With no homework open and no such question, it's all of the student's marks on the board.
 export async function captureLgRegion(region_id: string): Promise<LgRegionCapture> {
   const editor = linkedEditor;
   if (!editor) return "no_board";
-  const document = getActiveDocument(readLgState());
+  const state = readLgState();
+  const document = getActiveDocument(state);
+  const question = findBoardQuestion(state, region_id);
   const shapes = editor.getCurrentPageShapes();
 
   let include: TLShape[];
   let bounds: Box;
   // The working area already frames the problem, and wider padding would show the next one.
-  const padding = document ? 8 : 16;
-  if (document) {
+  let padding = document ? 8 : 16;
+  if (question) {
+    // The note shows the question being answered. The student may write a little outside the box.
+    const area = Box.From(question.answer).expandBy(24);
+    const overlapsArea = (shape: TLShape) => !!editor.getShapePageBounds(shape)?.collides(area);
+    const work = shapes.filter((shape) => isStudentMark(shape) && overlapsArea(shape));
+    if (!work.some((shape) => shape.type !== "image")) return "no_work";
+    const note = shapes.filter((shape) => shape.meta.question === question.id && shape.type === "note");
+    include = [...note, ...work];
+    bounds = Box.Common([Box.From(question.card), area, ...work.flatMap((shape) => editor.getShapePageBounds(shape) ?? [])]);
+    padding = 16;
+  } else if (document) {
     const item = findRegion(document, region_id);
     if (!item) return "unknown_region";
     const area = Box.From(regionWorkBounds(document, item));

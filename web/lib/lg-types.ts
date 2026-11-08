@@ -80,6 +80,19 @@ export type LgDocument = {
   regions: LgRegion[];
 };
 
+// A question the tutor wrote on the board for the student to answer: a note with the question
+// and a dashed box under it to answer in. Its ID (q1, q2, ...) works like a region ID for the
+// tutor's tools and for Check my work, so the tutor can teach on a blank board too.
+export type LgBoardQuestion = {
+  id: string;
+  text: string;
+  // The region it was written beside, or "" when it was written on a free spot of the board.
+  near: string;
+  // Board positions of the question note and of the answer box.
+  card: { x: number; y: number; w: number; h: number };
+  answer: { x: number; y: number; w: number; h: number };
+};
+
 export type ChatSpeaker = "student" | "tutor" | "system";
 
 export type ChatMessage = {
@@ -134,6 +147,10 @@ export type Conversation = {
   canvas_lms_assignment?: CanvasLmsAssignment | null;
   // Check my work results in this chat, for the summary turned in to Canvas LMS.
   work_checks?: WorkCheckRecord[];
+  // Questions the tutor wrote on this chat's board, and how many it has written so far, so a
+  // question's ID is never reused for another one, even after the tutor clears the board.
+  board_questions?: LgBoardQuestion[];
+  board_question_count?: number;
 };
 
 export type Option<T extends string> = { value: T; label: string };

@@ -4,14 +4,40 @@
     "tool_config": {
       "type": "client",
       "name": "focus_region",
-      "description": "Pan the board to a region of the homework. Use it before talking about a problem the student can't currently see.",
+      "description": "Bring a problem into view on the board. Use it before talking about a problem the student can't currently see.",
       "expects_response": false,
       "parameters": {
         "type": "object",
         "properties": {
-          "region_id": { "type": "string", "description": "ID of the region, exactly as listed, such as p1.q3." }
+          "region_id": {
+            "type": "string",
+            "description": "ID of a homework region exactly as listed, such as p1.q3, or of a question you wrote, such as q1."
+          }
         },
-        "required": ["region_id"]
+        "required": [
+          "region_id"
+        ]
+      }
+    }
+  },
+  {
+    "enabled": true,
+    "tool_config": {
+      "type": "client",
+      "name": "point_at",
+      "description": "Point at a problem with your pen, without leaving a mark. Use it as you say \"look here\".",
+      "expects_response": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "region_id": {
+            "type": "string",
+            "description": "ID of a homework region exactly as listed, such as p1.q3, or of a question you wrote, such as q1."
+          }
+        },
+        "required": [
+          "region_id"
+        ]
       }
     }
   },
@@ -20,14 +46,61 @@
     "tool_config": {
       "type": "client",
       "name": "circle_region",
-      "description": "Circle a region of the homework in the tutor's color. Use it as you start talking about that problem.",
+      "description": "Circle a problem by hand in your color, while you start talking about it. Good for naming what's being asked.",
       "expects_response": false,
       "parameters": {
         "type": "object",
         "properties": {
-          "region_id": { "type": "string", "description": "ID of the region, exactly as listed, such as p1.q3." }
+          "region_id": {
+            "type": "string",
+            "description": "ID of a homework region exactly as listed, such as p1.q3, or of a question you wrote, such as q1."
+          }
         },
-        "required": ["region_id"]
+        "required": [
+          "region_id"
+        ]
+      }
+    }
+  },
+  {
+    "enabled": true,
+    "tool_config": {
+      "type": "client",
+      "name": "underline_region",
+      "description": "Underline a problem by hand. Good for the facts that matter in a word problem.",
+      "expects_response": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "region_id": {
+            "type": "string",
+            "description": "ID of a homework region exactly as listed, such as p1.q3, or of a question you wrote, such as q1."
+          }
+        },
+        "required": [
+          "region_id"
+        ]
+      }
+    }
+  },
+  {
+    "enabled": true,
+    "tool_config": {
+      "type": "client",
+      "name": "highlight_region",
+      "description": "Highlight a problem with a marker. Good for the part the student should focus on.",
+      "expects_response": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "region_id": {
+            "type": "string",
+            "description": "ID of a homework region exactly as listed, such as p1.q3, or of a question you wrote, such as q1."
+          }
+        },
+        "required": [
+          "region_id"
+        ]
       }
     }
   },
@@ -36,16 +109,28 @@
     "tool_config": {
       "type": "client",
       "name": "draw_arrow",
-      "description": "Draw an arrow between two regions to show how they relate.",
+      "description": "Draw an arrow between two problems or questions to show how they relate.",
       "expects_response": false,
       "parameters": {
         "type": "object",
         "properties": {
-          "from_region_id": { "type": "string", "description": "ID of the region the arrow starts at." },
-          "to_region_id": { "type": "string", "description": "ID of the region the arrow points to." },
-          "label": { "type": "string", "description": "Optional short label for the arrow, a few words at most." }
+          "from_region_id": {
+            "type": "string",
+            "description": "ID the arrow starts at: a region such as p1.q3, or a question such as q1."
+          },
+          "to_region_id": {
+            "type": "string",
+            "description": "ID the arrow points to."
+          },
+          "label": {
+            "type": "string",
+            "description": "Optional short label for the arrow, a few words at most."
+          }
         },
-        "required": ["from_region_id", "to_region_id"]
+        "required": [
+          "from_region_id",
+          "to_region_id"
+        ]
       }
     }
   },
@@ -54,32 +139,111 @@
     "tool_config": {
       "type": "client",
       "name": "write_text",
-      "description": "Write a short hint in the margin beside a region. Use it for hints only, never for a final answer.",
+      "description": "Write a short hint in your handwriting beside a problem. Hints only, never a final answer.",
       "expects_response": false,
       "parameters": {
         "type": "object",
         "properties": {
-          "near_region_id": { "type": "string", "description": "ID of the region the note belongs beside." },
-          "text": { "type": "string", "description": "The note, a few words in the session's language." }
+          "near_region_id": {
+            "type": "string",
+            "description": "ID of the homework region, or of your question (such as q1), that this belongs beside."
+          },
+          "text": {
+            "type": "string",
+            "description": "The hint, a few words in the session's language."
+          }
         },
-        "required": ["near_region_id", "text"]
+        "required": [
+          "near_region_id",
+          "text"
+        ]
       }
     }
   },
   {
-    "enabled": false,
+    "enabled": true,
     "tool_config": {
       "type": "client",
       "name": "write_math",
-      "description": "Write a short equation in the margin beside a region. Use it for hints only, never for a final answer.",
+      "description": "Write a short equation beside a problem, as a hint step. Never a final answer.",
       "expects_response": false,
       "parameters": {
         "type": "object",
         "properties": {
-          "near_region_id": { "type": "string", "description": "ID of the region the equation belongs beside." },
-          "latex": { "type": "string", "description": "The equation as LaTeX. Never read this aloud." }
+          "near_region_id": {
+            "type": "string",
+            "description": "ID of the homework region, or of your question (such as q1), that this belongs beside."
+          },
+          "latex": {
+            "type": "string",
+            "description": "The equation as LaTeX, such as \\frac{3}{4} + x = 2. Never read this aloud."
+          }
         },
-        "required": ["near_region_id", "latex"]
+        "required": [
+          "near_region_id",
+          "latex"
+        ]
+      }
+    }
+  },
+  {
+    "enabled": true,
+    "tool_config": {
+      "type": "client",
+      "name": "number_line",
+      "description": "Draw a number line beside a problem, with values marked. Use it for fractions, decimals, negative numbers, inequalities and comparing sizes.",
+      "expects_response": false,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "near_region_id": {
+            "type": "string",
+            "description": "ID of the homework region, or of your question (such as q1), that this belongs beside."
+          },
+          "min": {
+            "type": "number",
+            "description": "The smallest number on the line."
+          },
+          "max": {
+            "type": "number",
+            "description": "The largest number on the line."
+          },
+          "marks": {
+            "type": "string",
+            "description": "Optional values to mark, separated by commas, each as value or value:label, such as \"1/2, 0.75:three quarters\". At most 6. Never mark the final answer."
+          }
+        },
+        "required": [
+          "near_region_id",
+          "min",
+          "max"
+        ]
+      }
+    }
+  },
+  {
+    "enabled": true,
+    "tool_config": {
+      "type": "client",
+      "name": "ask_question",
+      "description": "Write a question or a practice problem on the board for the student to answer, with a box under it to answer in. Works with or without homework. It returns the question's ID, such as q1, for your other tools and read_student_work. After calling it, stop and let the student answer.",
+      "expects_response": true,
+      "response_timeout_secs": 5,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "The question, short, in the session's language. Never include the answer."
+          },
+          "near_region_id": {
+            "type": "string",
+            "description": "Optional ID of the homework region to write it beside. Leave it out to write it on a free spot of the board."
+          }
+        },
+        "required": [
+          "question"
+        ]
       }
     }
   },
@@ -88,15 +252,20 @@
     "tool_config": {
       "type": "client",
       "name": "read_student_work",
-      "description": "Look at what the student has written on a region and get a report on whether it's right. Use it when the student asks you to look at or check their work. It takes a few seconds, so say you're taking a look first.",
+      "description": "Look at what the student has written on a problem, or in the answer box of one of your questions, and get a report on whether it's right. Use it when the student asks you to check their work, or when a message says they wrote an answer. It takes a few seconds, so say you're taking a look first.",
       "expects_response": true,
       "response_timeout_secs": 35,
       "parameters": {
         "type": "object",
         "properties": {
-          "region_id": { "type": "string", "description": "ID of the region, exactly as listed, such as p1.q3." }
+          "region_id": {
+            "type": "string",
+            "description": "ID of a homework region exactly as listed, such as p1.q3, or of a question you wrote, such as q1."
+          }
         },
-        "required": ["region_id"]
+        "required": [
+          "region_id"
+        ]
       }
     }
   },
@@ -105,7 +274,7 @@
     "tool_config": {
       "type": "client",
       "name": "clear",
-      "description": "Remove the tutor's own marks from the board. The student's work stays. Use it when moving to a different problem.",
+      "description": "Remove your own marks and questions from the board. The student's work stays. Use it when moving to a different problem.",
       "expects_response": false
     }
   }

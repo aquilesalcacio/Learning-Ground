@@ -4,7 +4,7 @@ import { LgApiAuthError, lgApiFetch } from "./lg-api";
 import { captureLgRegion } from "./lg-board-link";
 import { apiErrorMessage } from "./lg-document";
 import { findRegion } from "./lg-regions";
-import { getActiveDocument, getActiveTutor, readLgState, recordWorkCheck } from "./lg-store";
+import { findBoardQuestion, getActiveDocument, getActiveTutor, readLgState, recordWorkCheck } from "./lg-store";
 
 export type WorkCheck = {
   status: "correct" | "incomplete" | "error" | "blank" | "unreadable";
@@ -17,14 +17,25 @@ export type WorkCheckOutcome =
   | { ok: true; region_id: string; label: string; check: WorkCheck }
   | { ok: false; message: string };
 
+// A question the tutor wrote on the board is checked by its own text, within the API's 80 characters.
+const LABEL_MAX = 80;
+
+function questionLabel(id: string, text: string) {
+  const label = `Question ${id.replace(/^q/, "")}: ${text}`;
+  return label.length > LABEL_MAX ? `${label.slice(0, LABEL_MAX - 1).trimEnd()}…` : label;
+}
+
 // One path for the button and the voice tool: snapshot the region, then ask the API about it.
-// With no homework open, the whole board is checked, whatever region_id says.
+// A written question (q1) is checked by its answer box. With no homework open and no such
+// question, the whole board is checked, whatever region_id says.
 export async function checkStudentWork(region_id: string): Promise<WorkCheckOutcome> {
-  const document = getActiveDocument(readLgState());
+  const state = readLgState();
+  const document = getActiveDocument(state);
+  const question = findBoardQuestion(state, region_id);
   const region = findRegion(document, region_id);
-  if (document && !region) return { ok: false, message: `There's no region called ${region_id}.` };
-  const label = region?.label ?? "the board";
-  const checked_id = region?.region_id ?? "";
+  if (document && !region && !question) return { ok: false, message: `There's no region called ${region_id}.` };
+  const label = question ? questionLabel(question.id, question.text) : (region?.label ?? "the board");
+  const checked_id = question?.id ?? region?.region_id ?? "";
 
   const capture = await captureLgRegion(region_id);
   if (capture === "no_board") return { ok: false, message: "No board is open, so there's no work to check." };
