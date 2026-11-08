@@ -99,7 +99,7 @@ Cards leading to an editor. Each trait must audibly or visibly change the sessio
 | Teaching style | Persona prompt fragment; see section 5 |
 | Personality | Free text, in the editable prompt layer only |
 
-Ship 3 presets, so the demo needs no setup. Suggestion: "Prof. Ana" (PT, casual), "Don Mateo" (ES, formal), "Sam" (EN, humorous).
+Ship 3 presets, so the demo needs no setup: "Prof. Sam" (EN, humorous), the default and listed first; "Prof. Luisa" (PT, casual, a female voice); and "Prof. Erik" (ES, formal). Their IDs (`sam`, `prof-ana`, `don-mateo`) are from the first names, and stay because chats store them.
 
 ### 4.3 Chat
 A thin page reusing the same conversation component as Learning Grounds, with voice on or off. The tutor can offer to "open this on Learning Grounds". Graphs and docs sit below the cut line (section 11, row 9).
@@ -125,10 +125,10 @@ Rehearse on a prepared calculus PDF whose regions and solutions you've checked b
 
 **Core path, which must work:**
 1. **Problem (15 s):** "AI that hands you the answer can make your exam scores worse. Tutors that guide don't have that problem."
-2. **Pick tutor (15 s):** Choose Prof. Ana, a Portuguese casual tutor. Show the editor for a moment.
+2. **Pick tutor (15 s):** Choose Prof. Luisa, a Portuguese casual tutor. Show the editor for a moment.
 3. **Upload (20 s):** The PDF appears and regions are detected, with a brief visible highlight so judges see the intelligence.
 4. **Talk (60 s):** "Tô travado na questão 3." The tutor pans there, circles it while speaking in Portuguese, and writes a hint in the margin *without giving the answer*.
-5. **Switch (20 s):** Swap to Sam in English on the same problem. This proves customization in seconds.
+5. **Switch (20 s):** Swap to Prof. Sam in English on the same problem. This proves customization in seconds.
 6. **Close (20 s):** Technical point and what's next.
 
 **Stretch step, only if row 6 ships:** after step 4, the student writes a step, taps **Check my work**, and the tutor catches the sign error with an arrow.

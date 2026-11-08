@@ -13,6 +13,7 @@ import type {
   Tutor,
   WorkCheckRecord,
 } from "./lg-types";
+import { DEFAULT_TUTOR_ID, migrateLgState, PRESET_TUTORS, PRESETS_VERSION } from "./lg-presets";
 
 // Browser-only storage for the mock. FastAPI and Postgres replace this later.
 const STORAGE_KEY = "lg-state-v1";
@@ -30,25 +31,20 @@ export type LgState = {
   // so whatever the student draws there carries over when the chat begins.
   draft_id: string;
   canvas_lms: CanvasLmsInfo | null;
+  // Which starter tutors this save has seen (lg-presets.ts). A save without it is version 1.
+  presets_version: number;
 };
 
-function preset(id: string, name: string, color: Tutor["color"], language: Tutor["language"], tone: Tutor["tone"]): Tutor {
-  return { id, name, color, language, tone, voice_id: "", style: "", persona_prompt: "", is_preset: true };
-}
-
 const DEFAULT_STATE: LgState = {
-  // The three presets suggested in the vision doc, section 4.2.
-  tutors: [
-    preset("prof-ana", "Prof. Ana", "blue", "pt", "casual"),
-    preset("don-mateo", "Don Mateo", "red", "es", "formal"),
-    preset("sam", "Sam", "green", "en", "humorous"),
-  ],
-  active_tutor_id: "prof-ana",
+  // The three presets from the vision doc, section 4.2.
+  tutors: [...PRESET_TUTORS],
+  active_tutor_id: DEFAULT_TUTOR_ID,
   profile: { name: "", school: "", courses: "", language: "", struggles: "", upcoming: "" },
   conversations: [],
   active_conversation_id: null,
   draft_id: "",
   canvas_lms: null,
+  presets_version: PRESETS_VERSION,
 };
 
 let cached: LgState | null = null;
@@ -56,19 +52,22 @@ const listeners = new Set<() => void>();
 
 export function readLgState(): LgState {
   if (cached) return cached;
+  let migrated = false;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    const saved = raw ? JSON.parse(raw) : null;
+    const parsed = raw ? JSON.parse(raw) : null;
+    // Before the defaults are merged in, or their presets_version would hide an old save.
+    const saved = migrateLgState(parsed);
+    migrated = saved !== parsed;
     // Profiles saved before a field existed get its default instead of undefined.
     cached = saved ? { ...DEFAULT_STATE, ...saved, profile: { ...DEFAULT_STATE.profile, ...saved.profile } } : DEFAULT_STATE;
   } catch {
     cached = DEFAULT_STATE;
   }
   const loaded = cached as LgState;
-  if (!loaded.draft_id) {
-    cached = { ...loaded, draft_id: crypto.randomUUID() };
-    saveLgState(cached);
-  }
+  if (!loaded.draft_id) cached = { ...loaded, draft_id: crypto.randomUUID() };
+  // Saved without notifying anyone: this runs during render.
+  if (migrated || !loaded.draft_id) saveLgState(cached as LgState);
   return cached as LgState;
 }
 
