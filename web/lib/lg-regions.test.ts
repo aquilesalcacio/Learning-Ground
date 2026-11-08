@@ -8,8 +8,13 @@ import type { LgDocument } from "./lg-types";
 const regions = (await import(`./lg-regions${".ts"}`)) as typeof import("./lg-regions");
 const {
   boardPageSize,
+  documentFiles,
   documentPages,
+  FILE_GAP,
+  fileNames,
   findRegion,
+  pageSource,
+  placeNewFile,
   pageRegions,
   problemLabel,
   regionBounds,
@@ -151,4 +156,45 @@ test("finding and replacing a page's regions", () => {
     next.map((item) => item.region_id),
     ["p1.q1", "p1.q2", "p2.page"],
   );
+});
+
+test("saved page positions are kept, and pages without one still stack from the top", () => {
+  const document = documentWith([{ w: 816, h: 1056 }, { w: 816, h: 1056 }]);
+  document.pages[1] = { ...document.pages[1], x: 1500, y: -200 };
+  const [first, second] = documentPages(document);
+  assert.deepEqual([first.x, first.y], [0, 0]);
+  assert.deepEqual([second.x, second.y], [1500, -200]);
+});
+
+test("a new file gets its own column to the right, level with the top, leaving room for margin notes", () => {
+  assert.deepEqual(placeNewFile(null, [{ w: 816, h: 1056 }, { w: 816, h: 1056 }]), [
+    { x: 0, y: 0 },
+    { x: 0, y: 1116 },
+  ]);
+  const document = documentWith([{ w: 816, h: 1056 }, { w: 1056, h: 816 }]);
+  document.pages[0] = { ...document.pages[0], x: 0, y: 40 };
+  document.pages[1] = { ...document.pages[1], x: 0, y: 1156 };
+  const [spot] = placeNewFile(document, [{ w: 816, h: 1056 }]);
+  assert.equal(spot.x, 1056 + FILE_GAP);
+  assert.equal(spot.y, 40);
+});
+
+test("files: homework saved as one file, and each page's reading-cache key", () => {
+  const single = documentWith([{ w: 816, h: 1056 }]);
+  assert.deepEqual(documentFiles(single), [{ id: "file-1", filename: "sheet.pdf", hash: "abc", page_count: 1 }]);
+  assert.deepEqual(pageSource(single, single.pages[0]), { hash: "abc", page: 1 });
+
+  const two: LgDocument = {
+    ...single,
+    files: [
+      { id: "a", filename: "sheet.pdf", hash: "abc", page_count: 1 },
+      { id: "b", filename: "photo.png", hash: "def", page_count: 1 },
+    ],
+    pages: [
+      { ...single.pages[0], file: "a", source: 1 },
+      { number: 2, w: 816, h: 1056, read: "pending", file: "b", source: 1 },
+    ],
+  };
+  assert.deepEqual(pageSource(two, two.pages[1]), { hash: "def", page: 1 });
+  assert.equal(fileNames(documentFiles(two)), "sheet.pdf, photo.png");
 });

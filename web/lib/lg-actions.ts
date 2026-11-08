@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Box,
   createShapeId,
   DefaultColorStyle,
   type Editor,
@@ -8,6 +9,7 @@ import {
   react,
   type TLAsset,
   type TLAssetId,
+  type TLEventInfo,
   type TLShape,
   type TLShapeId,
   type TLShapePartial,
@@ -16,19 +18,24 @@ import {
 import { linkLgBoard, noteLgActionTarget } from "./lg-board-link";
 import {
   boardPageSize,
+  documentFiles,
   documentPages,
+  fileNames,
+  fileOfPage,
   findPage,
   findRegion,
   MARGIN_WIDTH,
   pageFocusBounds,
   pageRegions,
+  pageSource,
+  placeNewFile,
   regionBounds,
   regionFocusBounds,
   regionMarginX,
   replacePageRegions,
   wholePageRegion,
 } from "./lg-regions";
-import { LgDocumentError, type LgRenderedPage, openHomeworkFile, readHomeworkPage } from "./lg-document";
+import { LgDocumentError, openHomeworkFile, readHomeworkPage } from "./lg-document";
 import {
   appendMessage,
   getActiveDocument,
@@ -38,9 +45,10 @@ import {
   setConversationDocument,
   setLgDocument,
   startConversation,
+  subscribeLgState,
 } from "./lg-store";
 import { resolveLanguage } from "./lg-tutor-prompt";
-import type { LgBackground, LgDocument, LgRegion, PenColor } from "./lg-types";
+import type { LgBackground, LgDocument, LgDocumentPage, LgRegion, PenColor } from "./lg-types";
 
 // The seam between the board and the voice session (vision doc, section 8.1).
 // Voice client tools and the test buttons both call applyLgAction and nothing else.
@@ -377,8 +385,9 @@ function removeHomeworkShapes(editor: Editor, keepAssets: TLAssetId[] = []) {
   );
 }
 
-function drawPages(editor: Editor, document: LgDocument, assets: TLAsset[]) {
-  const pages = documentPages(document);
+// Puts some of the document's pages on the board, in page order, each with its stored image.
+function drawPageShapes(editor: Editor, document: LgDocument, numbers: number[], assets: TLAsset[]) {
+  const pages = documentPages(document).filter((page) => numbers.includes(page.number));
   const shapes: TLShapePartial[] = pages.map((page, index) => ({
     id: pageShapeId(page.number),
     type: "image",
@@ -452,31 +461,55 @@ function stopUpload() {
   uploadAbort = null;
 }
 
+// A page waiting to be read: its number on the board, and its own file's hash and page number,
+// which key the reading cache.
+type PageToRead = { number: number; hash: string; source: number; blob: Blob };
+
+// The images of pages already on the board, to read them (again). A missing one gives its number.
+async function storedPages(editor: Editor, document: LgDocument, pages: LgDocumentPage[]): Promise<PageToRead[] | number> {
+  const found: PageToRead[] = [];
+  for (const page of pages) {
+    const url = await editor.resolveAssetUrl(pageAssetId(editor.getShape(pageShapeId(page.number))), {
+      shouldResolveToOriginal: true,
+    });
+    const blob = url ? await fetch(url).then((response) => response.blob()).catch(() => null) : null;
+    if (!blob) return page.number;
+    const source = pageSource(document, page);
+    found.push({ number: page.number, hash: source.hash, source: source.page, blob });
+  }
+  return found;
+}
+
 // Reads the pages one at a time, updating that chat's document as each lands. The pages
 // stay usable throughout: a page that isn't read keeps its whole-page region.
-async function readPages(conversation_id: string, hash: string, pages: LgRenderedPage[], signal: AbortSignal) {
+async function readPages(conversation_id: string, hash: string, pages: PageToRead[], signal: AbortSignal) {
   const language = homeworkLanguage();
   const update = (change: (document: LgDocument) => LgDocument) => {
     setConversationDocument(conversation_id, (current) => (current && current.hash === hash ? change(current) : current));
     if (lgEditor && lgBoardId === conversation_id) syncRegionShapes(lgEditor, getConversationDocument(readLgState(), conversation_id));
   };
   let failure = "";
-  for (const [index, rendered] of pages.entries()) {
+  for (const [index, item] of pages.entries()) {
     if (signal.aborted) return;
     setUpload({ busy: "reading", page: index + 1, total: pages.length });
-    const outcome = await readHomeworkPage(rendered.blob, { hash, page: rendered.number, language, signal });
+    const outcome = await readHomeworkPage(item.blob, { hash: item.hash, page: item.source, language, signal });
     if (signal.aborted) return;
     if (outcome.ok) {
-      const regions = pageRegions(rendered.number, outcome.reading.problems, outcome.reading.page_text);
-      update((document) => ({
-        ...document,
-        pages: document.pages.map((page) => (page.number === rendered.number ? { ...page, read: "done" } : page)),
-        regions: replacePageRegions(document.regions, rendered.number, regions),
-      }));
+      const regions = pageRegions(item.number, outcome.reading.problems, outcome.reading.page_text);
+      update((document) =>
+        // A file removed while it was being read stays removed.
+        document.pages.some((page) => page.number === item.number)
+          ? {
+              ...document,
+              pages: document.pages.map((page) => (page.number === item.number ? { ...page, read: "done" } : page)),
+              regions: replacePageRegions(document.regions, item.number, regions),
+            }
+          : document,
+      );
       continue;
     }
     failure = outcome.message;
-    const failed = outcome.stop ? pages.slice(index).map((page) => page.number) : [rendered.number];
+    const failed = outcome.stop ? pages.slice(index).map((page) => page.number) : [item.number];
     update((document) => ({
       ...document,
       pages: document.pages.map((page) => (failed.includes(page.number) ? { ...page, read: "failed" } : page)),
@@ -488,7 +521,8 @@ async function readPages(conversation_id: string, hash: string, pages: LgRendere
   readListeners.forEach((listener) => listener(conversation_id));
 }
 
-// The full upload: check and render the file, put the pages on the board, then read them.
+// The full upload: check and render the file, put its pages on the board beside any homework
+// already open in this chat, then read them.
 export async function uploadLgHomework(file: File) {
   stopUpload();
   const editor = lgEditor;
@@ -527,22 +561,54 @@ export async function uploadLgHomework(file: File) {
     return;
   }
 
+  // Homework already open in this chat stays. The new file goes in its own column beside it,
+  // and its pages are numbered after the existing ones, so region IDs stay unique.
+  const state = readLgState();
+  const existing = boardId && state.active_conversation_id === boardId ? getActiveDocument(state) : null;
+  const sizes = opened.pages.map((page) => boardPageSize(page.width, page.height));
+  const spots = placeNewFile(existing, sizes);
+  const firstNumber = existing ? Math.max(0, ...existing.pages.map((page) => page.number)) + 1 : 1;
+  const fileId = `file-${crypto.randomUUID().slice(0, 8)}`;
+  const added: LgDocumentPage[] = opened.pages.map((page, index) => ({
+    number: firstNumber + index,
+    ...sizes[index],
+    ...spots[index],
+    read: "pending",
+    file: fileId,
+    source: page.number,
+  }));
+  const files = [
+    ...(existing ? documentFiles(existing) : []),
+    { id: fileId, filename: file.name, hash: opened.hash, page_count: added.length },
+  ];
   const document: LgDocument = {
-    filename: file.name,
-    page_count: opened.pages.length,
+    filename: fileNames(files),
+    page_count: (existing?.pages.length ?? 0) + added.length,
     status: "reading",
-    hash: opened.hash,
-    pages: opened.pages.map((page) => ({ number: page.number, ...boardPageSize(page.width, page.height), read: "pending" })),
-    regions: opened.pages.map((page) => wholePageRegion(page.number)),
+    hash: existing?.hash ?? opened.hash,
+    files,
+    pages: [...(existing?.pages ?? []), ...added],
+    regions: [...(existing?.regions ?? []), ...added.map((page) => wholePageRegion(page.number))],
   };
   // Adding homework on the start screen begins the chat, under the same board.
   const conversation_id = setLgDocument(document);
   if (!conversation_id) return;
-  removeHomeworkShapes(editor, assets.map((asset) => asset.id));
-  drawPages(editor, document, assets);
-  focusLgPage(1);
-  setUpload({ busy: "reading", conversation_id, page: 0, total: opened.pages.length });
-  await readPages(conversation_id, opened.hash, opened.pages, abort.signal);
+  if (!existing) removeHomeworkShapes(editor, assets.map((asset) => asset.id));
+  drawPageShapes(editor, document, added.map((page) => page.number), assets);
+  focusLgPage(firstNumber);
+
+  // Pages of an earlier file that weren't read yet are read along with this one.
+  const earlier = existing ? await storedPages(editor, document, existing.pages.filter((page) => page.read !== "done")) : [];
+  if (abort.signal.aborted) return;
+  const fresh: PageToRead[] = added.map((page, index) => ({
+    number: page.number,
+    hash: opened.hash,
+    source: page.source ?? index + 1,
+    blob: opened.pages[index].blob,
+  }));
+  const toRead = [...(Array.isArray(earlier) ? earlier : []), ...fresh];
+  setUpload({ busy: "reading", conversation_id, page: 0, total: toRead.length });
+  await readPages(conversation_id, document.hash, toRead, abort.signal);
 }
 
 // Reads the open chat's failed pages again, from the page images stored on its board.
@@ -557,17 +623,10 @@ export async function retryLgReading() {
   const abort = new AbortController();
   uploadAbort = abort;
   setUpload({ ...IDLE_UPLOAD, busy: "reading", conversation_id, filename: document.filename, total: failed.length });
-  const pages: LgRenderedPage[] = [];
-  for (const page of failed) {
-    const url = await editor.resolveAssetUrl(pageAssetId(editor.getShape(pageShapeId(page.number))), {
-      shouldResolveToOriginal: true,
-    });
-    const blob = url ? await fetch(url).then((response) => response.blob()).catch(() => null) : null;
-    if (!blob) {
-      setUpload({ ...IDLE_UPLOAD, error: `Page ${page.number} is missing from this browser. Upload the file again.` });
-      return;
-    }
-    pages.push({ number: page.number, blob, width: page.w, height: page.h });
+  const pages = await storedPages(editor, document, failed);
+  if (typeof pages === "number") {
+    setUpload({ ...IDLE_UPLOAD, error: `Page ${pages} is missing from this browser. Upload the file again.` });
+    return;
   }
   if (abort.signal.aborted) return;
   setConversationDocument(conversation_id, (current) => (current ? { ...current, status: "reading" } : current));
@@ -598,6 +657,40 @@ function forgetMissingHomework(editor: Editor, filename: string) {
   );
 }
 
+// The board saves a moment after the chat does, so a reload right after removing or moving a file
+// can find the two apart. Pages the homework no longer lists go, so none is left stuck on the
+// board. For where pages sit, the board wins, because the marks on them were saved with them.
+function reconcileSavedPages(editor: Editor, conversation_id: string, document: LgDocument) {
+  const known = new Set(document.pages.map((page) => page.number));
+  const strays = pageImages(editor).filter((shape) => !known.has(Number(shape.meta.page)));
+  if (strays.length) {
+    const assets = strays.flatMap((shape) => pageAssetId(shape) ?? []);
+    editor.run(
+      () => {
+        editor.deleteShapes(strays);
+        if (assets.length) editor.deleteAssets(assets);
+      },
+      { history: "ignore", ignoreShapeLock: true },
+    );
+  }
+  const drifted = documentPages(document).some((page) => {
+    const shape = editor.getShape(pageShapeId(page.number));
+    return !!shape && (Math.abs(shape.x - page.x) > 0.5 || Math.abs(shape.y - page.y) > 0.5);
+  });
+  if (!drifted) return;
+  setConversationDocument(
+    conversation_id,
+    (current) =>
+      current && {
+        ...current,
+        pages: current.pages.map((page) => {
+          const shape = editor.getShape(pageShapeId(page.number));
+          return shape ? { ...page, x: shape.x, y: shape.y } : page;
+        }),
+      },
+  );
+}
+
 function checkSavedHomework(editor: Editor) {
   const state = readLgState();
   const conversation = state.conversations.find((item) => item.id === state.active_conversation_id);
@@ -608,6 +701,7 @@ function checkSavedHomework(editor: Editor) {
     else if (lockedShapes(editor).length) removeHomeworkShapes(editor);
     return;
   }
+  if (conversation) reconcileSavedPages(editor, conversation.id, document);
   const images = pageImages(editor);
   const assetIds = images.map(pageAssetId);
   if (images.length < document.pages.length || assetIds.some((id) => !id || !editor.getAsset(id))) {
@@ -629,6 +723,277 @@ function checkSavedHomework(editor: Editor) {
   void editor.resolveAssetUrl(assetIds[0], { shouldResolveToOriginal: true }).then((url) => {
     if (!url && lgEditor === editor) forgetMissingHomework(editor, document.filename);
   });
+}
+
+// Files on the board: where each sits on screen, which one is selected, and moving or removing
+// one. The pages stay locked in tldraw, so its own tools never move them. Only these functions do,
+// taking the region outlines and every mark on the file along, and saving where the pages end up,
+// so the tutor's marks, Check my work and region positions stay right.
+
+export type LgBoardFile = {
+  id: string;
+  filename: string;
+  pageCount: number;
+  // On screen, relative to the board.
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
+const NO_FILES: LgBoardFile[] = [];
+let boardFiles: LgBoardFile[] = NO_FILES;
+let selectedFile: string | null = null;
+const fileListeners = new Set<() => void>();
+
+function notifyFiles() {
+  fileListeners.forEach((listener) => listener());
+}
+
+export function getLgFiles(): LgBoardFile[] {
+  return boardFiles;
+}
+
+export function getNoLgFiles(): LgBoardFile[] {
+  return NO_FILES;
+}
+
+export function getLgSelectedFile(): string | null {
+  return selectedFile;
+}
+
+export function subscribeLgFiles(listener: () => void) {
+  fileListeners.add(listener);
+  return () => {
+    fileListeners.delete(listener);
+  };
+}
+
+export function selectLgFile(id: string | null) {
+  if (id === selectedFile) return;
+  selectedFile = id;
+  notifyFiles();
+}
+
+// The homework of the board that's open.
+function boardDocument(): LgDocument | null {
+  return lgBoardId ? getConversationDocument(readLgState(), lgBoardId) : null;
+}
+
+function filePageNumbers(document: LgDocument, fileId: string): number[] {
+  return document.pages.filter((page) => fileOfPage(page) === fileId).map((page) => page.number);
+}
+
+function pageShapeBounds(editor: Editor, numbers: number[]): Box[] {
+  return numbers.flatMap((number) => {
+    const shape = editor.getShape(pageShapeId(number));
+    const bounds = shape && editor.getShapePageBounds(shape);
+    return bounds ? [bounds] : [];
+  });
+}
+
+// A file's pages, its region outlines, and every mark whose centre is on one of its pages or in
+// their margins, where the tutor writes notes.
+function attachedShapes(editor: Editor, document: LgDocument, numbers: number[]): TLShape[] {
+  const areas = pageShapeBounds(editor, numbers).map((bounds) =>
+    Box.From(pageFocusBounds({ number: 0, x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h })),
+  );
+  return editor.getCurrentPageShapes().filter((shape) => {
+    if (shape.meta.kind === "page") return numbers.includes(Number(shape.meta.page));
+    if (shape.meta.kind === "region") return numbers.includes(findRegion(document, String(shape.meta.region_id))?.page ?? -1);
+    const bounds = editor.getShapePageBounds(shape);
+    return !!bounds && areas.some((area) => area.containsPoint(bounds.center));
+  });
+}
+
+function fileAt(editor: Editor, point: { x: number; y: number }): string | null {
+  const document = boardDocument();
+  const page = document?.pages.find((item) => pageShapeBounds(editor, [item.number])[0]?.containsPoint(point));
+  return page ? fileOfPage(page) : null;
+}
+
+function computeBoardFiles(editor: Editor): LgBoardFile[] {
+  const document = boardDocument();
+  if (!document) return NO_FILES;
+  return documentFiles(document).flatMap((file) => {
+    const boxes = pageShapeBounds(editor, filePageNumbers(document, file.id));
+    if (!boxes.length) return [];
+    const box = Box.Common(boxes);
+    const topLeft = editor.pageToViewport({ x: box.minX, y: box.minY });
+    const bottomRight = editor.pageToViewport({ x: box.maxX, y: box.maxY });
+    return [
+      {
+        id: file.id,
+        filename: file.filename,
+        pageCount: boxes.length,
+        x: topLeft.x,
+        y: topLeft.y,
+        w: bottomRight.x - topLeft.x,
+        h: bottomRight.y - topLeft.y,
+      },
+    ];
+  });
+}
+
+function sameFiles(a: LgBoardFile[], b: LgBoardFile[]) {
+  const close = (one: number, two: number) => Math.abs(one - two) < 0.5;
+  return (
+    a.length === b.length &&
+    a.every((file, index) => {
+      const other = b[index];
+      return (
+        other.id === file.id &&
+        other.filename === file.filename &&
+        other.pageCount === file.pageCount &&
+        close(other.x, file.x) &&
+        close(other.y, file.y) &&
+        close(other.w, file.w) &&
+        close(other.h, file.h)
+      );
+    })
+  );
+}
+
+// Keeps the files' screen positions current as the board pans, zooms and changes.
+function watchBoardFiles(editor: Editor) {
+  const refresh = () => {
+    const next = computeBoardFiles(editor);
+    const keepSelection = !selectedFile || next.some((file) => file.id === selectedFile);
+    if (sameFiles(next, boardFiles) && keepSelection) return;
+    boardFiles = next;
+    if (!keepSelection) selectedFile = null;
+    notifyFiles();
+  };
+  const stopFollowingBoard = react("lg board files", () => {
+    // Read first, so panning, zooming and shape changes always rerun this, even while the chat
+    // has no homework and refresh returns early.
+    editor.getCamera();
+    editor.getCurrentPageShapes();
+    refresh();
+  });
+  const stopFollowingState = subscribeLgState(refresh);
+  return () => {
+    stopFollowingBoard();
+    stopFollowingState();
+    boardFiles = NO_FILES;
+    selectedFile = null;
+    notifyFiles();
+  };
+}
+
+// With the select tool, clicking a file selects it. tldraw ignores the locked pages, so a click
+// on one reaches here with nothing selected; a student mark it did select wins over the file.
+function watchFileClicks(editor: Editor) {
+  let downAt: { x: number; y: number } | null = null;
+  const onEvent = (info: TLEventInfo) => {
+    if (info.type !== "pointer") return;
+    if (info.name === "pointer_down") {
+      downAt = { x: info.point.x, y: info.point.y };
+      return;
+    }
+    if (info.name !== "pointer_up" || !downAt) return;
+    const moved = Math.hypot(info.point.x - downAt.x, info.point.y - downAt.y);
+    downAt = null;
+    if (editor.getCurrentToolId() !== "select" || moved > 4) return;
+    const point = editor.inputs.getCurrentPagePoint();
+    queueMicrotask(() => {
+      selectLgFile(editor.getSelectedShapeIds().length ? null : fileAt(editor, point));
+    });
+  };
+  editor.on("event", onEvent);
+  const stopFollowingTool = react("lg file selection tool", () => {
+    if (editor.getCurrentToolId() !== "select") selectLgFile(null);
+  });
+  return () => {
+    editor.off("event", onEvent);
+    stopFollowingTool();
+  };
+}
+
+let movingFile: string | null = null;
+let movingShapes: TLShapeId[] = [];
+
+export function startLgFileMove(fileId: string) {
+  const editor = lgEditor;
+  const document = boardDocument();
+  if (!editor || !document) return;
+  movingFile = fileId;
+  movingShapes = attachedShapes(editor, document, filePageNumbers(document, fileId)).map((shape) => shape.id);
+}
+
+// Moves the file being dragged by a distance in screen pixels.
+export function moveLgFileBy(dx: number, dy: number) {
+  const editor = lgEditor;
+  if (!editor || !movingShapes.length) return;
+  const zoom = editor.getZoomLevel();
+  const updates: TLShapePartial[] = movingShapes.flatMap((id) => {
+    const shape = editor.getShape(id);
+    return shape ? [{ id, type: shape.type, x: shape.x + dx / zoom, y: shape.y + dy / zoom }] : [];
+  });
+  editor.run(() => editor.updateShapes(updates), { history: "ignore", ignoreShapeLock: true });
+}
+
+// Saves where the file's pages ended up, so everything placed from the document follows.
+export function endLgFileMove() {
+  const editor = lgEditor;
+  const conversation_id = lgBoardId;
+  const fileId = movingFile;
+  movingFile = null;
+  movingShapes = [];
+  if (!editor || !conversation_id || !fileId) return;
+  setConversationDocument(
+    conversation_id,
+    (current) =>
+      current && {
+        ...current,
+        pages: current.pages.map((page) => {
+          if (fileOfPage(page) !== fileId) return page;
+          const shape = editor.getShape(pageShapeId(page.number));
+          return shape ? { ...page, x: shape.x, y: shape.y } : page;
+        }),
+      },
+  );
+  syncRegionShapes(editor, boardDocument());
+}
+
+// Removes one file: its pages and outlines, and the tutor's marks on it. The student's own marks
+// stay. The last file removes the homework altogether.
+export function removeLgFile(fileId: string) {
+  const editor = lgEditor;
+  const conversation_id = lgBoardId;
+  const document = boardDocument();
+  if (!editor || !conversation_id || !document) return;
+  selectLgFile(null);
+  if (documentFiles(document).length <= 1) {
+    removeLgDocument();
+    return;
+  }
+  const numbers = filePageNumbers(document, fileId);
+  const shapes = attachedShapes(editor, document, numbers).filter((shape) => shape.meta.kind || shape.meta.author === "tutor");
+  const assets = shapes.flatMap((shape) => (shape.meta.kind === "page" ? (pageAssetId(shape) ?? []) : []));
+  editor.run(
+    () => {
+      editor.deleteShapes(shapes);
+      if (assets.length) editor.deleteAssets(assets);
+    },
+    { history: "ignore", ignoreShapeLock: true },
+  );
+  setConversationDocument(conversation_id, (current) => {
+    if (!current) return current;
+    const files = documentFiles(current).filter((file) => file.id !== fileId);
+    const pages = current.pages.filter((page) => !numbers.includes(page.number));
+    return {
+      ...current,
+      files,
+      filename: fileNames(files),
+      page_count: pages.length,
+      pages,
+      regions: current.regions.filter((item) => !numbers.includes(item.page)),
+    };
+  });
+  syncRegionShapes(editor, boardDocument());
+  // A live session hears the region list that's left.
+  readListeners.forEach((listener) => listener(conversation_id));
 }
 
 // The student's first stroke on the start screen begins a chat. Pages and tutor marks carry
@@ -657,11 +1022,15 @@ export function bindLearningGrounds(editor: Editor, boardId: string) {
   const stopWatchingHomework = watchHomeworkShapes(editor);
   const stopWatchingTool = react("lg current tool", () => setToolFromEditor(editor));
   const stopWatchingMarks = startChatOnFirstMark(editor);
+  const stopWatchingFiles = watchBoardFiles(editor);
+  const stopWatchingClicks = watchFileClicks(editor);
   return () => {
     unlink();
     stopWatchingHomework();
     stopWatchingTool();
     stopWatchingMarks();
+    stopWatchingFiles();
+    stopWatchingClicks();
     if (lgEditor === editor) {
       lgEditor = null;
       lgBoardId = null;

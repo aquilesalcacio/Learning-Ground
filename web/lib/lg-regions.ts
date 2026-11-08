@@ -1,7 +1,7 @@
 // Where the homework sits on the board, read from the open document (plan B3).
 // This is the only module that converts box_2d into board positions.
 // Type-only imports keep it runnable under `node --test` without a bundler.
-import type { LgDocument, LgDocumentPage, LgRegion } from "./lg-types";
+import type { LgDocument, LgDocumentFile, LgDocumentPage, LgRegion } from "./lg-types";
 
 export type { LgRegion };
 
@@ -28,16 +28,63 @@ export function boardPageSize(pixelW: number, pixelH: number): { w: number; h: n
   return { w: Math.max(1, Math.round(pixelW * scale)), h: Math.max(1, Math.round(pixelH * scale)) };
 }
 
-// Pages stack down the board in order, each with its own size.
-export function layoutPages(pages: Pick<LgDocumentPage, "number" | "w" | "h">[]): LgPage[] {
+// A page with a saved position sits there. Pages without one (saved before files could be
+// added or moved) stack down the board in order, each with its own size.
+export function layoutPages(pages: Pick<LgDocumentPage, "number" | "w" | "h" | "x" | "y">[]): LgPage[] {
   let y = 0;
   return [...pages]
     .sort((a, b) => a.number - b.number)
     .map((page) => {
+      if (typeof page.x === "number" && typeof page.y === "number") {
+        return { number: page.number, x: page.x, y: page.y, w: page.w, h: page.h };
+      }
       const placed = { number: page.number, x: 0, y, w: page.w, h: page.h };
       y += page.h + PAGE_GAP;
       return placed;
     });
+}
+
+// Files sit side by side. The gap leaves room for the tutor's margin notes beside a page
+// (MARGIN_GAP + MARGIN_WIDTH below) and the left gutter of the next file.
+export const FILE_GAP = 460;
+
+// Positions for a new file's pages: a fresh column to the right of everything on the board,
+// level with its top, pages stacked down it. The first file starts at the origin.
+export function placeNewFile(document: LgDocument | null, sizes: { w: number; h: number }[]): { x: number; y: number }[] {
+  const placed = document ? documentPages(document) : [];
+  const x = placed.length ? Math.max(...placed.map((page) => page.x + page.w)) + FILE_GAP : 0;
+  let y = placed.length ? Math.min(...placed.map((page) => page.y)) : 0;
+  return sizes.map((size) => {
+    const spot = { x, y };
+    y += size.h + PAGE_GAP;
+    return spot;
+  });
+}
+
+// Homework saved before several files were allowed is one file with this ID.
+export const SINGLE_FILE_ID = "file-1";
+
+export function fileOfPage(page: Pick<LgDocumentPage, "file">): string {
+  return page.file ?? SINGLE_FILE_ID;
+}
+
+export function documentFiles(document: LgDocument): LgDocumentFile[] {
+  return (
+    document.files ?? [
+      { id: SINGLE_FILE_ID, filename: document.filename, hash: document.hash, page_count: document.pages.length },
+    ]
+  );
+}
+
+// The names shown to the tutor and used as a chat's title.
+export function fileNames(files: Pick<LgDocumentFile, "filename">[]): string {
+  return files.map((file) => file.filename).join(", ");
+}
+
+// The file and page number that key the reading cache for one of the document's pages.
+export function pageSource(document: LgDocument, page: LgDocumentPage): { hash: string; page: number } {
+  const file = documentFiles(document).find((item) => item.id === fileOfPage(page));
+  return { hash: file?.hash ?? document.hash, page: page.source ?? page.number };
 }
 
 const layouts = new WeakMap<LgDocument, LgPage[]>();

@@ -35,7 +35,14 @@ Never commit these files. Without the agent ID, the panel shows an error when yo
    | `sendWhenReady(message)` | Send a typed message now, or when the connecting session opens. Typed messages aren't reported to `onLine`, so add them to the chat yourself |
    | `sendContextualUpdate(message)` | Background information the tutor uses but doesn't reply to. A connecting session gets it once it opens. Returns false and drops it when no session is live or connecting |
    | `muted`, `setMuted(value)` | Microphone mute |
-   | `checkWork(region_id)`, `checking` | The Check my work button and its loading state |
+   | `checkWork(region_id)`, `checking` | Check my work and its loading state. The UI has no button for it: students ask the tutor by voice or chat, and the tutor calls `read_student_work` |
+
+   The tutor orb uses `useLgVoiceLevels()` from the same file, which is read-only and never starts, ends or changes a session:
+
+   | Field | What it does |
+   |---|---|
+   | `live`, `speaking` | Whether a session is connected, and whether the tutor is speaking |
+   | `getOutputLevel()`, `getInputLevel()` | The tutor's voice level and the student's microphone level, 0 to 1, and 0 with no session. Called every animation frame |
 
    Each session builds its prompt when it starts, with `buildTutorPrompt` in `web/lib/lg-tutor-prompt.ts`, from the tutor, the Student Profile and the open chat's homework (`homeworkContext(document)` in `lg-voice.tsx`, which is null with no homework). When pages finish reading during a live session, `chat-dock.tsx` sends the region list with `sendContextualUpdate(homeworkContextualUpdate(...))`, using `onLgHomeworkRead` from `lg-actions.ts`.
 
@@ -62,6 +69,15 @@ Never commit these files. Without the agent ID, the panel shows an error when yo
 
 Uploads go through `uploadLgHomework(file)` in `web/lib/lg-actions.ts`, and the upload dialog shows its progress with `subscribeLgUpload` and `getLgUpload`.
 
+A chat's homework can hold several files. Uploading again adds the new file beside the others instead of replacing them: its pages are numbered after the existing ones (so region IDs stay unique, such as `p3.q1` for the first problem of a second file's first page), and they go in a new column to the right, with room for margin notes (`placeNewFile` in `lg-regions.ts`). Pages of an earlier file that weren't read yet are read along with the new one.
+
+Students can move and remove files on the board:
+
+- **Moving** goes through `startLgFileMove`, `moveLgFileBy` and `endLgFileMove`. A file's pages move together, with their region outlines and every mark on them or in their margins, and the new positions are saved in the document. The page images stay locked, so tldraw's own tools still can't move them.
+- **Removing** goes through `removeLgFile`. It deletes the file's pages, outlines and the tutor's marks on it. The student's own marks stay. Removing the last file removes the homework, as `removeLgDocument` does.
+- **Where files are on screen** comes from `getLgFiles` and `subscribeLgFiles`. `components/board-files.tsx` uses it for the move handles and the selected file's toolbar.
+- **Saved positions:** when a board opens, the document and the board are reconciled. The board saves a moment after the chat, so after a quick reload the page positions on the board win, and pages the document no longer lists are removed.
+
 1. `web/lib/lg-document.ts` checks the file by its bytes: PDF, PNG, JPG or WEBP, up to 20 MB and 10 pages. It renders each page to an image of about 2000 px on the long side, with pdf.js for PDFs (loaded only in the browser, with its worker bundled by `new Worker(new URL(...), import.meta.url)`) and with a photo's EXIF rotation applied.
 2. Each page image is stored with `editor.getAssetForExternalContent`, so it's saved in the chat board's IndexedDB under its `persistenceKey`, and placed as a locked page image. The pages are usable at once, with one whole-page region each.
 3. The pages are read one at a time with `POST /documents/read-page`, and the chat's regions are replaced page by page. A page that fails keeps its whole-page region, and the dialog offers **Read again**. Readings are cached in localStorage by file hash, page and language, so uploading the same file again makes no API call.
@@ -70,9 +86,10 @@ The chat's document, saved with the chat in localStorage:
 
 | Field | What it holds |
 |---|---|
-| `filename`, `page_count`, `hash` | The file, its page count and the SHA-256 of its bytes |
+| `filename`, `page_count`, `hash` | Every file's name, comma-separated, the total page count, and the SHA-256 of the first file's bytes, which identifies the homework while it's read |
+| `files[]` | `{ id, filename, hash, page_count }` for each file. Missing on homework saved before several files were allowed, where `documentFiles()` in `lg-regions.ts` treats it as one file |
 | `status` | `reading` while pages are being read, else `ready` |
-| `pages[]` | `{ number, w, h, read }`: each page's size in board units (portrait and landscape both work) and whether it was read (`pending`, `done` or `failed`) |
+| `pages[]` | `{ number, w, h, read, x, y, file, source }`: each page's size in board units (portrait and landscape both work), whether it was read (`pending`, `done` or `failed`), where it sits on the board, which file it came from, and its page number inside that file, which keys the reading cache. Pages saved before files could move have no `x`, `y`, `file` or `source`, and stack down from the top |
 | `regions[]` | `{ region_id, label, page, box_2d, text }`. `box_2d` is `[ymin, xmin, ymax, xmax]` on a 0–1000 scale of the page |
 
 If a reopened board has the document but not its page images, for example after site data was cleared, the document is dropped and a system line in the chat asks the student to upload the file again.

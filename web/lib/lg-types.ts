@@ -36,6 +36,22 @@ export type LgDocumentPage = {
   w: number;
   h: number;
   read: "pending" | "done" | "failed";
+  // Where the page sits on the board. Every upload sets it, because files sit side by side and
+  // the student can move them. Pages saved before that have none, and stack down from the top.
+  x?: number;
+  y?: number;
+  // The file it came from (an LgDocument.files id), and its page number inside that file, which
+  // keys the reading cache. Pages saved before files have neither: they belong to one file.
+  file?: string;
+  source?: number;
+};
+
+// One uploaded file. A chat's homework can hold several, each in its own column on the board.
+export type LgDocumentFile = {
+  id: string;
+  filename: string;
+  hash: string;
+  page_count: number;
 };
 
 // A problem on a page. The app builds region_id (p1.q3, or p1.page for a whole page), never Gemini.
@@ -48,12 +64,17 @@ export type LgRegion = {
   text: string;
 };
 
+// A chat's homework: one or more files. Pages are numbered across all of them, so region IDs
+// such as p3.q1 stay unique. filename lists every file's name, for the tutor and the chat title.
 export type LgDocument = {
   filename: string;
   page_count: number;
+  // Missing on homework saved before several files were allowed: then it's the one file.
+  files?: LgDocumentFile[];
   // "reading" while Gemini works through the pages; the pages are usable throughout.
   status: "reading" | "ready";
-  // SHA-256 of the file's bytes, which keys the page-reading cache.
+  // SHA-256 of the first file's bytes. It identifies this homework while its pages are read;
+  // each file's own hash, in files, keys the page-reading cache.
   hash: string;
   pages: LgDocumentPage[];
   regions: LgRegion[];

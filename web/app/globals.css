@@ -4,6 +4,39 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+  Learning Grounds design system. Light theme only (docs/design/brief.md).
+  Colour comes from the tutor: the --tutor-* variables are set per tutor by paletteVars()
+  in lib/lg-palette.ts. Everything else stays a warm neutral.
+*/
+
+/* Registered so a change of tutor can fade between colours instead of snapping. */
+@property --tutor-c1 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.68 0.19 262);
+}
+@property --tutor-c2 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.8 0.13 210);
+}
+@property --tutor-c3 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.67 0.2 300);
+}
+@property --tutor-accent {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.52 0.2 262);
+}
+@property --tutor-mark {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #4263eb;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -39,6 +72,12 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+  --color-glass: var(--glass-bg);
+  --color-tutor-1: var(--tutor-c1);
+  --color-tutor-2: var(--tutor-c2);
+  --color-tutor-3: var(--tutor-c3);
+  --color-tutor-accent: var(--tutor-accent);
+  --color-tutor-mark: var(--tutor-mark);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -48,39 +87,82 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+@theme {
+  /* Type: a big, tight display size for greetings, then a calm reading scale. */
+  --text-display: 2.75rem;
+  --text-display--line-height: 1.05;
+  --text-display--letter-spacing: -0.035em;
+  --text-display--font-weight: 600;
+  --text-title: 1.75rem;
+  --text-title--line-height: 1.15;
+  --text-title--letter-spacing: -0.025em;
+  --text-title--font-weight: 600;
+  --text-heading: 1.125rem;
+  --text-heading--line-height: 1.35;
+  --text-heading--letter-spacing: -0.01em;
+  --text-heading--font-weight: 600;
+
+  /* Motion: springy for things the student touches, soft for everything that just appears. */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --shadow-float: 0 1px 0 oklch(1 0 0 / 0.7) inset, 0 14px 40px -14px oklch(0.32 0.03 60 / 0.28),
+    0 2px 8px -2px oklch(0.32 0.03 60 / 0.12);
+  --shadow-lift: 0 22px 60px -18px oklch(0.32 0.03 60 / 0.35), 0 4px 14px -4px oklch(0.32 0.03 60 / 0.16);
+}
+
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  /* Warm neutrals: a light grey that leans toward paper, never blue. */
+  --background: oklch(0.972 0.005 80);
+  --foreground: oklch(0.24 0.012 60);
+  --card: oklch(0.995 0.002 80);
+  --card-foreground: oklch(0.24 0.012 60);
+  --popover: oklch(0.995 0.002 80);
+  --popover-foreground: oklch(0.24 0.012 60);
+  --primary: oklch(0.25 0.012 60);
+  --primary-foreground: oklch(0.985 0.003 80);
+  --secondary: oklch(0.94 0.006 75);
+  --secondary-foreground: oklch(0.24 0.012 60);
+  --muted: oklch(0.945 0.006 75);
+  --muted-foreground: oklch(0.5 0.012 65);
+  --accent: oklch(0.94 0.006 75);
+  --accent-foreground: oklch(0.24 0.012 60);
+  --destructive: oklch(0.56 0.21 27);
+  --border: oklch(0.9 0.006 75);
+  --input: oklch(0.9 0.006 75);
+  /* Focus rings take the tutor's accent. */
+  --ring: var(--tutor-accent);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --radius: 0.875rem;
+  --sidebar: oklch(0.985 0.003 80);
+  --sidebar-foreground: oklch(0.24 0.012 60);
+  --sidebar-primary: oklch(0.25 0.012 60);
+  --sidebar-primary-foreground: oklch(0.985 0.003 80);
+  --sidebar-accent: oklch(0.94 0.006 75);
+  --sidebar-accent-foreground: oklch(0.24 0.012 60);
+  --sidebar-border: oklch(0.9 0.006 75);
+  --sidebar-ring: var(--tutor-accent);
+
+  /* Dot grid. The board will draw the same grid, so starting work causes no jump. */
+  --dot-color: oklch(0.875 0.007 72);
+  --dot-radius: 1px;
+  --dot-gap: 22px;
+  --dot-glow-radius: 160px;
+
+  /* Glass: see-through white with a glossy sheen and a bright top edge. For chat surfaces. */
+  --glass-bg: oklch(1 0 0 / 0.42);
+  --glass-border: oklch(1 0 0 / 0.75);
+  --glass-blur: 24px;
+
+  /* Durations. Anything that repeats often stays under --dur-base. */
+  --dur-fast: 150ms;
+  --dur-base: 240ms;
+  --dur-slow: 480ms;
+  --dur-tint: 900ms;
 }
 
 .dark {
@@ -102,11 +184,6 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
@@ -115,6 +192,101 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+}
+
+/* Lets an element take on a tutor's colours and fade to the next tutor's. */
+@utility tutor-theme {
+  transition:
+    --tutor-c1 var(--dur-tint) var(--ease-soft),
+    --tutor-c2 var(--dur-tint) var(--ease-soft),
+    --tutor-c3 var(--dur-tint) var(--ease-soft),
+    --tutor-accent var(--dur-tint) var(--ease-soft),
+    --tutor-mark var(--dur-tint) var(--ease-soft);
+}
+
+/* A faint wash of the tutor's colours. Quiet enough that text over it stays easy to read. */
+@utility tutor-tint {
+  background-image:
+    radial-gradient(60% 55% at 12% 8%, color-mix(in oklch, var(--tutor-c1) 16%, transparent), transparent 70%),
+    radial-gradient(50% 50% at 92% 18%, color-mix(in oklch, var(--tutor-c2) 14%, transparent), transparent 70%),
+    radial-gradient(60% 55% at 62% 105%, color-mix(in oklch, var(--tutor-c3) 14%, transparent), transparent 70%);
+}
+
+@utility dot-grid {
+  background-image: radial-gradient(
+    circle at center,
+    var(--dot-color) var(--dot-radius),
+    transparent calc(var(--dot-radius) + 0.6px)
+  );
+  background-size: var(--dot-gap) var(--dot-gap);
+}
+
+/* Brighter, larger dots in the tutor's colour, shown only in a circle around the pointer. */
+@utility dot-grid-glow {
+  background-image: radial-gradient(
+    circle at center,
+    color-mix(in oklch, var(--tutor-c1) 70%, var(--tutor-c2)) calc(var(--dot-radius) + 0.6px),
+    transparent calc(var(--dot-radius) + 1.2px)
+  );
+  background-size: var(--dot-gap) var(--dot-gap);
+  mask-image: radial-gradient(
+    var(--dot-glow-radius) circle at var(--px, -999px) var(--py, -999px),
+    black,
+    transparent 75%
+  );
+  opacity: var(--glow, 0);
+  transition: opacity var(--dur-slow) var(--ease-soft);
+}
+
+/* Glossy glass for the chat bar, transcript, popovers and dialogs. */
+@utility glass {
+  background-color: var(--glass-bg);
+  background-image: linear-gradient(
+    180deg,
+    oklch(1 0 0 / 0.6) 0%,
+    oklch(1 0 0 / 0.2) 48%,
+    oklch(1 0 0 / 0.08) 52%,
+    oklch(1 0 0 / 0.28) 100%
+  );
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0 / 0.95),
+    inset 0 -1px 0 oklch(1 0 0 / 0.3),
+    0 1px 2px oklch(0.3 0.02 60 / 0.06),
+    0 18px 44px -18px oklch(0.3 0.03 60 / 0.32);
+}
+
+/* Solid, glossy white in the iPhone style, for the sidebar. No see-through. */
+@utility surface-solid {
+  background-color: oklch(1 0 0);
+  background-image: linear-gradient(180deg, oklch(1 0 0) 0%, oklch(0.988 0.002 80) 100%);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 0),
+    0 0 0 1px oklch(0.3 0.02 60 / 0.06),
+    0 1px 2px oklch(0.3 0.02 60 / 0.05),
+    0 20px 50px -22px oklch(0.3 0.03 60 / 0.3);
+}
+
+/* Springy feedback for anything the student presses. */
+@utility pressable {
+  transition:
+    transform var(--dur-base) var(--ease-spring),
+    box-shadow var(--dur-base) var(--ease-soft),
+    background-color var(--dur-fast) var(--ease-soft);
+  &:hover:not(:disabled) {
+    transform: translateY(-1px) scale(1.02);
+  }
+  &:active:not(:disabled) {
+    transform: scale(0.95);
+    transition-duration: var(--dur-fast);
+  }
+}
+
+/* Homework pages look like paper lying on the dot grid. */
+.tl-shape[data-shape-type="image"] {
+  filter: drop-shadow(0 1px 1px oklch(0.3 0.02 60 / 0.1)) drop-shadow(0 12px 28px oklch(0.3 0.03 60 / 0.14));
 }
 
 @layer base {
@@ -126,5 +298,18 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+/* Feedback stays, movement goes: colour and opacity changes still play. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
+  .pressable:hover,
+  .pressable:active {
+    transform: none !important;
   }
 }

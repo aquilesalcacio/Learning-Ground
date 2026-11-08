@@ -4,8 +4,10 @@ import { PanelLeftOpen } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useState, useSyncExternalStore } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
+import { DotField } from "@/components/dot-field";
 import { Button } from "@/components/ui/button";
-import { useHydrated, useLgState } from "@/lib/lg-store";
+import { paletteVars } from "@/lib/lg-palette";
+import { getActiveTutor, useHydrated, useLgState } from "@/lib/lg-store";
 
 const DESKTOP_QUERY = "(min-width: 768px)";
 
@@ -46,13 +48,24 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="relative flex h-full overflow-hidden">
+    // isolate keeps the background layer behind the content, but above the page colour.
+    // --sidebar-overlay tells things pinned to the left edge, like the docked tutor orb, how far
+    // to move so the sidebar never covers them. Only phones need it: on wider screens the
+    // sidebar pushes the page instead of covering it.
+    <div
+      className="tutor-theme relative isolate flex h-full overflow-hidden"
+      style={{
+        ...paletteVars(getActiveTutor(state).color),
+        ["--sidebar-overlay" as string]: open && !isDesktop ? "18rem" : "0px",
+      }}
+    >
+      <DotField className="-z-10" />
       {open && !isDesktop && (
         <button
           type="button"
           aria-label="Close sidebar"
           tabIndex={-1}
-          className="absolute inset-0 z-20 cursor-default bg-black/20"
+          className="absolute inset-0 z-20 cursor-default bg-black/10 backdrop-blur-[2px]"
           onClick={() => setOpen(false)}
         />
       )}
@@ -67,11 +80,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         {hydrated && !open && (
           <Button
             type="button"
-            variant="outline"
-            size="icon-sm"
+            variant="ghost"
+            size="icon"
             aria-label="Open sidebar"
             title="Open sidebar"
-            className="absolute top-3 left-3 z-10 rounded-full bg-background shadow-sm"
+            className="surface-solid absolute top-3 left-3 z-30 rounded-full hover:bg-white"
             onClick={() => setOpen(true)}
           >
             <PanelLeftOpen />

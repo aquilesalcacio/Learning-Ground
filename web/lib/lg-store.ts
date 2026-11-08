@@ -108,6 +108,28 @@ export function setActiveTutor(id: string) {
   writeLgState({ ...readLgState(), active_tutor_id: id });
 }
 
+// Picking a tutor on the Tutors page. A chat already under way stays with its tutor in history,
+// and the new tutor starts fresh on the start screen. A chat with no conversation yet (only
+// homework or drawing) moves to the new tutor, so that work isn't lost.
+export function chooseTutor(id: string) {
+  const state = readLgState();
+  const active = getActiveConversation(state);
+  if (!active || active.tutor_id === id) {
+    writeLgState({ ...state, active_tutor_id: id });
+    return;
+  }
+  const talkedAlready = active.messages.some((message) => message.who !== "system");
+  writeLgState(
+    talkedAlready
+      ? { ...state, active_tutor_id: id, active_conversation_id: null }
+      : {
+          ...state,
+          active_tutor_id: id,
+          conversations: state.conversations.map((item) => (item.id === active.id ? { ...item, tutor_id: id } : item)),
+        },
+  );
+}
+
 export function updateTutor(id: string, patch: Partial<Tutor>) {
   const state = readLgState();
   writeLgState({
