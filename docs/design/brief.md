@@ -37,6 +37,18 @@ The **tutors are the stars.** Each tutor is a floating orb, like a smart-speaker
 
    Run its checks after every merge.
 
+## Logo
+The logo is the name with a lightbulb over the "i", above a grid in perspective. Its files are in `web/public/brand/`, and `components/brand-logo.tsx` shows it.
+
+| File | Use |
+| --- | --- |
+| `learning-grounds-wordmark.png` | The name and bulb, without the grid: headers and other small spaces. In the app it sits top left, in the sidebar, or beside the sidebar button when the sidebar is closed |
+| `learning-grounds-logo.png` | With the grid: large spaces, such as a login or welcome screen |
+| `learning-grounds-wordmark-light.png` | White version for dark backgrounds |
+| `learning-grounds-logo-original.png` | The file as supplied, on its grey background |
+
+All but the original have a transparent background and dark ink (`#111`), so they sit on the dot grid, the white sidebar or glass.
+
 ## Tutors and colour
 - The code has five tutor colours: `blue`, `red`, `green`, `orange` and `violet` (`TUTOR_COLORS` in `web/lib/lg-types.ts`). Their single hex values live in `COLOR_HEX` there.
 - Turn each colour into a **palette**:

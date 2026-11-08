@@ -4,6 +4,7 @@ import { PanelLeftOpen } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { type ReactNode, useState, useSyncExternalStore } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
+import { BrandLogo } from "@/components/brand-logo";
 import { DotField } from "@/components/dot-field";
 import { Button } from "@/components/ui/button";
 import { paletteVars } from "@/lib/lg-palette";
@@ -89,6 +90,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           >
             <PanelLeftOpen />
           </Button>
+        )}
+        {/* With the sidebar closed, the logo sits beside its button, except while the student
+            works on the board, where only the button stays. */}
+        {hydrated && !open && !(onBoard && state.active_conversation_id) && (
+          <BrandLogo className="absolute top-[1.125rem] left-14 z-30 h-5 duration-300 animate-in fade-in-0" />
         )}
         <main
           className={`flex min-h-0 flex-1 flex-col ${onBoard ? "overflow-hidden" : "overflow-y-auto max-md:pt-10"}`}
