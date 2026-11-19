@@ -2,7 +2,7 @@
 
 Every Canvas LMS user, Canvas Lite included, has a Calendar Feed link (Calendar > Calendar Feed) meant
 for calendar apps. The student pastes it here; we fetch it on demand and keep only the URL, under
-their Auth0 user ID, so Refresh works. Only Canvas LMS feed URLs are fetched, without redirects.
+their user ID (the browser's guest ID), so Refresh works. Only Canvas LMS feed URLs are fetched, without redirects.
 """
 import os
 import re

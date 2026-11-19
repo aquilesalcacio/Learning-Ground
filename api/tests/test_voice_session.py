@@ -61,5 +61,5 @@ def test_missing_settings_are_a_503(monkeypatch):
 
 
 @pytest.mark.real_auth
-def test_needs_a_logged_in_student():
+def test_needs_a_guest_id():
     assert client.post("/voice/session").status_code == 401

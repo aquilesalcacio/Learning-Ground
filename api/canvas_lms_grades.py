@@ -1,7 +1,7 @@
 """Turn in to Canvas LMS: a Learning Grounds session sent back as the student's submission, with a score.
 
 LTI 1.1 Basic Outcomes. When a student opens a graded assignment that uses Learning Grounds, Canvas
-LMS sends lis_outcome_service_url and lis_result_sourcedid. We keep them under the student's Auth0
+LMS sends lis_outcome_service_url and lis_result_sourcedid. We keep them under the student's
 user ID (canvas_lms_lti.claim). When the student confirms Turn in, we send a signed replaceResult
 with a completion score and a summary that says plainly it came from Learning Grounds.
 

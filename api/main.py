@@ -4,8 +4,8 @@
 
 Endpoints: POST /check-work (Check my work), POST /documents/read-page (homework pages),
 POST /voice/session (a one-time credential for a tutor session), and the Canvas LMS connection
-under /canvas-lms/*. Every endpoint except /health and the Canvas LMS callback
-needs an Auth0 access token (see auth.py).
+under /canvas-lms/*. There's no login: every endpoint except /health, the LTI routes and the
+Canvas LMS callback needs the browser's guest ID (see auth.py).
 
 Run from api/. Reads its keys from api/.env.
 """
@@ -219,7 +219,7 @@ async def post_lti_launch(request: Request) -> Response:
         log.info("rejected lti launch: %s", error)
         return HTMLResponse(lti_error_page(str(error)), status_code=401)
     code = canvas_lms_lti.hand_off(canvas_lms_lti.launch_data(fields), canvas_lms_lti.outcome_of(fields))
-    # The web app's launch page claims it after Auth0 login, then opens the board or the profile.
+    # The web app's launch page claims it for the browser's guest ID, then opens the board or the profile.
     return RedirectResponse(f"{WEB_BASE_URL}/canvas-lms/launch?{urlencode({'code': code})}", status_code=303)
 
 

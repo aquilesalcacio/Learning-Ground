@@ -2,7 +2,7 @@
 
 Students never paste tokens; that breaks Canvas API policy. Each student authorizes our Developer Key
 on their Canvas LMS instance, and this module keeps the resulting tokens on the server, keyed by the
-student's Auth0 user ID. Nothing else from Canvas LMS is stored: the profile is fetched on demand and
+student's user ID (the browser's guest ID, see auth.py). Nothing else from Canvas LMS is stored: the profile is fetched on demand and
 handed to the browser, which keeps it the way it keeps the manual profile.
 
 Configuration (api/.env): CANVAS_LMS_BASE_URL, CANVAS_LMS_CLIENT_ID, CANVAS_LMS_CLIENT_SECRET,
@@ -143,14 +143,14 @@ def _sign(payload: str) -> str:
 
 
 def sign_state(sub: str, now: float | None = None) -> str:
-    """A signed, expiring, single-use `state` that carries the student's Auth0 user ID through Canvas LMS."""
+    """A signed, expiring, single-use `state` that carries the student's user ID through Canvas LMS."""
     now = time.time() if now is None else now
     payload = _b64(json.dumps({"sub": sub, "nonce": secrets.token_urlsafe(16), "exp": int(now) + STATE_TTL_SECONDS}).encode())
     return f"{payload}.{_sign(payload)}"
 
 
 def read_state(state: str, now: float | None = None) -> str:
-    """Returns the Auth0 user ID from a state made by sign_state, or raises CanvasLmsError."""
+    """Returns the user ID from a state made by sign_state, or raises CanvasLmsError."""
     now = time.time() if now is None else now
     payload, _, signature = state.partition(".")
     if not payload or not hmac.compare_digest(signature, _sign(payload)):

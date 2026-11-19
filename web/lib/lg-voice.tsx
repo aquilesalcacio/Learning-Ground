@@ -10,7 +10,7 @@ import {
 } from "@elevenlabs/react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { applyLgAction, askLgQuestion, doneLookingAtLgWork, type LgAction, lookAtLgWork } from "./lg-actions";
-import { LgApiAuthError, lgApiFetch } from "./lg-api";
+import { lgApiFetch } from "./lg-api";
 import { checkStudentWork, type WorkCheck, type WorkCheckOutcome, workReport } from "./lg-check-work";
 import { apiErrorMessage } from "./lg-document";
 import { parseNumber, parseNumberLineMarks } from "./lg-ink";
@@ -133,8 +133,7 @@ async function sessionCredential(textOnly: boolean): Promise<SessionCredential |
     if (textOnly && body.signed_url) return { signedUrl: body.signed_url };
     if (!textOnly && body.conversation_token) return { conversationToken: body.conversation_token };
     return START_FAILED;
-  } catch (error) {
-    if (error instanceof LgApiAuthError) return error.message;
+  } catch {
     return "The tutor can't reach the server. Check your connection and try again.";
   }
 }

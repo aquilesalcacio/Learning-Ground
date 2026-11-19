@@ -7,6 +7,10 @@ const nextConfig: NextConfig = {
   // The tutor orb docks in the bottom-left corner, where Next's dev badge sits by default.
   devIndicators: { position: "top-right" },
   partialPrefetching: true,
+  // There's no login any more. Old login and logout links, and older deploy.sh health checks, land on the start.
+  async redirects() {
+    return [{ source: "/auth/:path*", destination: "/", permanent: false }];
+  },
   turbopack: {
     rules: {
       "*.css": {

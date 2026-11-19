@@ -35,7 +35,7 @@ Docker and certbot are already on the server for tagmephotos. Don't reinstall Do
 
 ## 3. The environment files
 
-From the laptop, send each service's settings straight to the server. The keys come from `api/.env` and `web/.env.local`, and the addresses from the domain, so nothing local (localhost URLs, `AUTH_DISABLED`) reaches the server. Each command asks for the root password.
+From the laptop, send each service's settings straight to the server. The keys come from `api/.env` and `web/.env.local`, and the addresses from the domain, so nothing local (localhost URLs) reaches the server. Each command asks for the root password.
 
 ```bash
 cd api
@@ -43,9 +43,9 @@ uv run scripts/deploy_env.py api <domain> | ssh root@187.77.50.15 'umask 077; ca
 uv run scripts/deploy_env.py web <domain> --tldraw-key <key> | ssh root@187.77.50.15 'umask 077; cat > /opt/learning-grounds/deploy/.env.web'
 ```
 
-`.env.api` holds `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, `GEMINI_API_KEY`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `WEB_ORIGINS`, `WEB_BASE_URL` and the three `LTI_*` values. `.env.web` holds the Auth0 app's values with a new `AUTH0_SECRET`, `APP_BASE_URL` with both addresses (so Auth0 returns a student to the one they started on), `NEXT_PUBLIC_API_URL` and the tldraw key.
+`.env.api` holds `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID`, `GEMINI_API_KEY`, `WEB_ORIGINS`, `WEB_BASE_URL` and the three `LTI_*` values. `.env.web` holds `NEXT_PUBLIC_API_URL` and the tldraw key. There's no login (Auth0 was removed on Nov 19), so neither file needs `AUTH0_*` values; old ones left in them do nothing.
 
-The `CANVAS_LMS_*` OAuth values are only for a school's Canvas LMS instance with a Developer Key. Canvas Lite has none, so we leave them out, and the Student Profile hides its Connect button. Never set `AUTH_DISABLED` on the server.
+The `CANVAS_LMS_*` OAuth values are only for a school's Canvas LMS instance with a Developer Key. Canvas Lite has none, so we leave them out, and the Student Profile hides its Connect button.
 
 ## 4. Build and start
 
@@ -77,16 +77,6 @@ Then open `https://api.<domain>/health`. It should show `{"status":"ok"}`.
 
 ## 6. Outside services
 
-**Auth0** (Applications → Learning Grounds → Settings):
-
-| Field | Add |
-|---|---|
-| Allowed Callback URLs | `https://<domain>/auth/callback`, `https://www.<domain>/auth/callback` |
-| Allowed Logout URLs | `https://<domain>`, `https://www.<domain>` |
-| Allowed Web Origins | `https://<domain>`, `https://www.<domain>` |
-
-Keep the localhost entries, so local development still works.
-
 **Canvas LMS** (Canvas Lite, course "Sharkbyte test"): in **Settings → Apps → View App Configurations**, delete the old Learning Grounds app, then **+ App** with:
 
 - **Configuration Type:** By URL
@@ -111,7 +101,7 @@ From then on, every web build talking to the agent must be one that gets credent
 
 ## 7. Check the live site
 
-1. Open `https://<domain>`. It sends you to log in, then back to the start screen.
+1. Open `https://<domain>`. The start screen appears, with no login.
 2. Upload a homework PDF. Its pages appear and are read one by one.
 3. Start a voice session and ask the tutor to circle problem 3. The pen draws as it talks.
 4. Write on the problem and ask the tutor to check your work.

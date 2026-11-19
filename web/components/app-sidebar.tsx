@@ -1,6 +1,5 @@
 "use client";
 
-import { useUser } from "@auth0/nextjs-auth0";
 import { GraduationCap, PanelLeftClose, Plus, Trash2 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -45,10 +44,9 @@ export function AppSidebar({
   const onBoard = pathname === "/";
   const conversations = hydrated ? sortedConversations(state) : [];
   const { name, school } = state.profile;
-  const { user } = useUser();
-  const photo = state.canvas_lms?.photo_url || user?.picture;
-  // The name the student typed (or imported) wins; Auth0's is the fallback.
-  const displayName = name.trim() || user?.name?.trim() || "";
+  const photo = state.canvas_lms?.photo_url;
+  // The name the student typed, or imported from Canvas LMS.
+  const displayName = name.trim();
   const onTutors = pathname.startsWith("/tutors");
   const onProfile = pathname.startsWith("/profile");
 
@@ -148,7 +146,7 @@ export function AppSidebar({
 
           {process.env.NODE_ENV === "development" && onBoard && <TutorActions />}
 
-          {/* The logged-in student (Auth0). This is the only way to the Student Profile. */}
+          {/* The student. This is the only way to the Student Profile. */}
           <Link
             href="/profile"
             aria-label="Student Profile"
@@ -156,7 +154,7 @@ export function AppSidebar({
             className={`${ROW} mt-1 py-2.5`}
           >
             {photo ? (
-              // eslint-disable-next-line @next/next/no-img-element -- Canvas LMS and Auth0 avatars come from many hosts.
+              // eslint-disable-next-line @next/next/no-img-element -- Canvas LMS avatars come from many hosts.
               <img src={photo} alt="" referrerPolicy="no-referrer" className="size-8 shrink-0 rounded-full" />
             ) : (
               <span
@@ -171,12 +169,6 @@ export function AppSidebar({
               {school.trim() && <span className="block truncate text-xs text-muted-foreground">{school.trim()}</span>}
             </span>
           </Link>
-          {user && (
-            // A full page load, not a client route: Auth0 clears the session and comes back to the start.
-            <a href="/auth/logout" className={`${ROW} text-muted-foreground`}>
-              Log out
-            </a>
-          )}
         </div>
       </div>
     </aside>

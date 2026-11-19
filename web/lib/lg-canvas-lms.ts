@@ -4,7 +4,7 @@
 // - LTI 1.1: the student opens Learning Grounds from their Canvas LMS course (api/canvas_lms_lti.py).
 // - Calendar feed: the student pastes their Canvas LMS calendar feed link (api/canvas_lms_feed.py).
 // - OAuth2: needs a school's Developer Key, so it only shows when the server has one (api/canvas_lms.py).
-import { LgApiAuthError, lgApiFetch } from "./lg-api";
+import { lgApiFetch } from "./lg-api";
 import { apiErrorMessage } from "./lg-document";
 import {
   markCanvasLmsTurnedIn,
@@ -64,8 +64,8 @@ async function call<T>(path: string, init: RequestInit, fallback: string): Promi
     const response = await lgApiFetch(path, init);
     if (!response.ok) return { ok: false, message: await apiErrorMessage(response, fallback) };
     return { ok: true, value: (await response.json()) as T };
-  } catch (error) {
-    return { ok: false, message: error instanceof LgApiAuthError ? error.message : UNREACHABLE };
+  } catch {
+    return { ok: false, message: UNREACHABLE };
   }
 }
 

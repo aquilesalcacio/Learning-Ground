@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { buttonVariants } from "@/components/ui/button";
 import { claimCanvasLmsLaunch } from "@/lib/lg-canvas-lms";
 
-// Where Canvas LMS sends a student who opened Learning Grounds from a course (after Auth0 login).
+// Where Canvas LMS sends a student who opened Learning Grounds from a course.
 // It collects what Canvas LMS sent, then opens the assignment's chat or the Student Profile.
 export function CanvasLmsLaunchView() {
   const router = useRouter();

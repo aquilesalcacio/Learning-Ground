@@ -5,7 +5,7 @@ shared secret (Course Settings > Apps > + App > Paste XML, using GET /lti/config
 shows in the course menu, and can be the tool on an assignment. When a student clicks it, their
 browser POSTs a launch signed with OAuth 1.0a HMAC-SHA1. We check the signature, keep the Canvas LMS
 facts for a few minutes under a one-time code, and send the browser to the web app, which claims them
-after Auth0 login and fills the Student Profile.
+for its guest ID and fills the Student Profile.
 
 Configuration (api/.env): LTI_CONSUMER_KEY, LTI_SHARED_SECRET, optionally LTI_LAUNCH_URL.
 """

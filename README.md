@@ -2,7 +2,7 @@
 
 A voice tutor that works through homework with you on a shared whiteboard. Upload a homework PDF, and the tutor reads each page, then talks it through with you by voice or text. It draws on the board while it talks: it circles a problem, underlines the key facts, writes a hint in math, draws a number line, or writes a question for you to answer in a box. Ask it to check your work, and it reads your handwriting.
 
-**Live:** https://learningrounds.com. Log in with Google or an email address.
+**Live:** https://learningrounds.com. No login: open it and start.
 
 Built at SharkByte 2026 by Lorenzo and Aquiles.
 
@@ -11,11 +11,13 @@ Built at SharkByte 2026 by Lorenzo and Aquiles.
 | Part | Built with |
 |---|---|
 | Web app (`web/`) | Next.js 16 and React 19, tldraw for the board, ElevenLabs Agents for the tutor's voice and board tools, KaTeX for math |
-| API (`api/`) | FastAPI, Gemini to read homework pages and check work, Auth0 for login and API access |
+| API (`api/`) | FastAPI, Gemini to read homework pages and check work |
 | Canvas LMS | An LTI 1.1 app: open Learning Grounds from a course menu, and turn work in from the board |
 | Hosting (`deploy/`) | Docker on a Hostinger VPS behind nginx. Every push to `main` deploys itself. |
 
-The browser never holds the ElevenLabs key or the agent ID. A logged-in student's browser asks our API for a one-time session credential.
+The browser never holds the ElevenLabs key or the agent ID. The student's browser asks our API for a one-time session credential.
+
+There's no login. Each browser keeps a random guest ID and sends it with every API call, so one visitor's Canvas LMS data stays apart from another's. Chats, tutors and the Student Profile stay in the browser.
 
 ## Run it locally
 

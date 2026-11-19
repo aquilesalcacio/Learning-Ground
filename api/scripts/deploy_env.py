@@ -4,7 +4,7 @@
     uv run scripts/deploy_env.py web example.com --tldraw-key KEY | ssh root@SERVER 'cat > /opt/learning-grounds/deploy/.env.web'
 
 Run from api/. Keys come from api/.env and web/.env.local, and every address comes from the domain, so
-nothing local (localhost URLs, AUTH_DISABLED) reaches the server. The output holds secrets: send it to
+nothing local (localhost URLs) reaches the server. The output holds secrets: send it to
 the server (or pbcopy), and never commit it or paste it into a chat.
 """
 import argparse
@@ -14,7 +14,6 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-AUDIENCE = "https://api.learning-grounds.dev"
 CANVAS_LMS_OAUTH = ("CANVAS_LMS_BASE_URL", "CANVAS_LMS_CLIENT_ID", "CANVAS_LMS_CLIENT_SECRET")
 
 
@@ -53,8 +52,6 @@ def api_block(domain: str, env: dict[str, str]) -> tuple[list[str], list[str]]:
         f"ELEVENLABS_API_KEY={take(env, 'ELEVENLABS_API_KEY', 'api/.env', missing)}",
         f"ELEVENLABS_AGENT_ID={take(env, 'ELEVENLABS_AGENT_ID', 'api/.env', missing)}",
         f"GEMINI_API_KEY={take(env, 'GEMINI_API_KEY', 'api/.env', missing)}",
-        f"AUTH0_DOMAIN={take(env, 'AUTH0_DOMAIN', 'api/.env', missing)}",
-        f"AUTH0_AUDIENCE={env.get('AUTH0_AUDIENCE') or AUDIENCE}",
         f"WEB_ORIGINS=https://{domain},https://www.{domain}",
         f"WEB_BASE_URL=https://{domain}",
         f"LTI_CONSUMER_KEY={env.get('LTI_CONSUMER_KEY') or 'learning-grounds'}",
@@ -74,14 +71,6 @@ def api_block(domain: str, env: dict[str, str]) -> tuple[list[str], list[str]]:
 def web_block(domain: str, env: dict[str, str], tldraw_key: str) -> tuple[list[str], list[str]]:
     missing: list[str] = []
     lines = [
-        f"AUTH0_DOMAIN={take(env, 'AUTH0_DOMAIN', 'web/.env.local', missing)}",
-        f"AUTH0_CLIENT_ID={take(env, 'AUTH0_CLIENT_ID', 'web/.env.local', missing)}",
-        f"AUTH0_CLIENT_SECRET={take(env, 'AUTH0_CLIENT_SECRET', 'web/.env.local', missing)}",
-        # A new one for production, so a local session cookie never works on the live site.
-        f"AUTH0_SECRET={secrets.token_hex(32)}",
-        f"AUTH0_AUDIENCE={env.get('AUTH0_AUDIENCE') or AUDIENCE}",
-        # Both addresses, so logging in from www. comes back to www.
-        f"APP_BASE_URL=https://{domain},https://www.{domain}",
         f"NEXT_PUBLIC_API_URL=https://api.{domain}",
     ]
     key = tldraw_key.strip() or env.get("NEXT_PUBLIC_TLDRAW_LICENSE_KEY", "").strip()

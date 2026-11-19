@@ -192,7 +192,7 @@ def test_status_reports_lti_ready():
     assert client.get("/canvas-lms/status").json()["lti_ready"] is True
 
 
-def test_claim_needs_login():
+def test_claim_needs_a_guest_id():
     from auth import require_user
 
     app.dependency_overrides.pop(require_user, None)
